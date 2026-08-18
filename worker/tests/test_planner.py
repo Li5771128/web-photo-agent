@@ -74,7 +74,7 @@ class PlannerTest(unittest.TestCase):
     def test_jpeg_and_people_tighten_temperature_and_clip_risks(self) -> None:
         clipped_target = measure_image(Image.new("RGB", (4, 4), (255, 255, 255)), "standard")
         comparison = compare_measurements(self.reference, clipped_target)
-        result = validate_plan(draft({"highlights": 4, "whites": 4, "temperature": 15}), clipped_target, VISION, comparison, False)
+        result = validate_plan(draft({"highlights": 10, "whites": 10, "temperature": 15}), clipped_target, VISION, comparison, False)
         by_key = {item["key"]: item for item in result["parameters"]}
 
         self.assertEqual(by_key["highlights"]["value"], 0)

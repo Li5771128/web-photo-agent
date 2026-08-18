@@ -158,11 +158,12 @@ def validate_plan(draft: dict[str, Any], target: dict[str, Any], vision: dict[st
         value = item.get("value")
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             raise ValueError(f"invalid plan value: {key}")
-        lower, upper = _risk_adjusted_range(key, rule, target, vision, target_is_raw)
         numeric = float(value)
-        span = upper - lower
-        if numeric < lower - span * 0.25 or numeric > upper + span * 0.25:
+        base_lower, base_upper = rule.raw_range if target_is_raw else rule.jpeg_range
+        base_span = base_upper - base_lower
+        if numeric < base_lower - base_span * 0.25 or numeric > base_upper + base_span * 0.25:
             raise ValueError(f"unsafe plan value: {key}")
+        lower, upper = _risk_adjusted_range(key, rule, target, vision, target_is_raw)
         clamped = max(lower, min(upper, numeric))
         if clamped != numeric:
             notes.append(f"{rule.label}由 {numeric:g} 收紧为 {clamped:g}。")

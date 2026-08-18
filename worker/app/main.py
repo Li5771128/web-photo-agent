@@ -295,9 +295,9 @@ class Worker:
             return
         try:
             safe_plan = validate_plan(draft, target_measurement, result, comparison, target_is_raw)
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError) as error:
             self.repository.fail_plan(task_id, "plan_validation_failed")
-            logger.warning("Task %s planning draft failed deterministic validation", task_id)
+            logger.warning("Task %s planning draft failed deterministic validation: %s", task_id, error)
             return
 
         if self.repository.complete_plan(

@@ -1,3 +1,5 @@
+import { Comparison, comparisonEntries } from "../lib/analysis-results";
+
 type ImageSummary = {
   scene_type: string;
   subjects: string[];
@@ -30,12 +32,11 @@ type Measurement = {
   raw_clues: Record<string, unknown> | null;
 };
 
-type Difference = { delta: number; direction: "increase" | "decrease" | "similar" };
 export type Measurements = {
   schemaVersion: number;
   reference: Measurement;
   target: Measurement;
-  comparison: Record<string, Difference>;
+  comparison: Comparison;
   completedAt: string;
 };
 
@@ -147,10 +148,10 @@ const comparisonLabels: Record<string, string> = {
   white_clip_fraction: "白场裁切", hue_distribution_distance: "色相分布差异",
 };
 
-function ComparisonReport({ comparison }: { comparison: Record<string, Difference> }) {
+function ComparisonReport({ comparison }: { comparison: Comparison }) {
   const direction = { increase: "提高", decrease: "降低", similar: "接近" } as const;
   return <section className="result-section" aria-labelledby="comparison-title"><div className="result-section-heading"><div><p className="step">REFERENCE → TARGET</p><h3 id="comparison-title">A/B 差异方向</h3></div></div>
-    <div className="comparison-grid">{Object.entries(comparison).map(([key, value]) => <article key={key}><span>{comparisonLabels[key] ?? key}</span><strong className={value.direction}>{direction[value.direction]}</strong><small>{value.delta > 0 ? "+" : ""}{value.delta.toFixed(3)}</small></article>)}</div>
+    <div className="comparison-grid">{comparisonEntries(comparison).map(([key, value]) => <article key={key}><span>{comparisonLabels[key] ?? key}</span><strong className={value.direction}>{direction[value.direction]}</strong><small>{value.delta > 0 ? "+" : ""}{value.delta.toFixed(3)}</small></article>)}</div>
   </section>;
 }
 

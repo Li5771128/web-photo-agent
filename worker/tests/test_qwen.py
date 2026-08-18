@@ -123,6 +123,7 @@ class QwenVisionClientTest(unittest.TestCase):
         self.assertEqual(result, draft)
         self.assertEqual(response_id, "resp-test")
         self.assertFalse(observed["store"])
+        self.assertEqual(observed["reasoning"], {"effort": "none"})
         content = observed["input"][0]["content"]
         self.assertTrue(all(item["type"] == "input_text" for item in content))
         serialized = json.dumps(observed)

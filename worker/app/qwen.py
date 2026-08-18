@@ -159,6 +159,7 @@ class QwenPlanningClient(QwenVisionClient):
         payload = {
             "model": self.model,
             "store": False,
+            "reasoning": {"effort": "none"},
             "instructions": PLANNING_INSTRUCTIONS,
             "input": [
                 {

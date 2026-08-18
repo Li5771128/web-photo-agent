@@ -39,3 +39,11 @@
 - 可行度由本地确定性差异和版本化语义扣分规则计算，模型不能自行决定最终分数。
 - 新增 `planning → validating → ready` 状态、`lightroom_plans` 持久化和只重试规划的队列任务；失败时保留测量与识图结果。
 - 36 项 Worker 单元测试、Web 生产构建/TypeScript、Worker 镜像、数据库迁移和无付费 API 的测量冒烟通过；真实千问双调用效果留待人工验收。
+
+### 2026-08-19 — 真实图片联调缺陷修复
+
+- 使用桌面 `test1.jpg` / `test2.jpg` 复现结果页崩溃：comparison 的 `schema_version` 元字段被当成差异项调用 `delta.toFixed()`；新增结果数据适配层和回归测试，只渲染合法差异项。
+- `qwen3.7-plus` 的规划调用默认使用高强度思考，三次 60 秒超时；规划请求改为 `reasoning.effort: none`，真实调用约 25 秒返回。
+- 修正校验顺序：先用 RAW/JPEG 基础范围识别异常值，再按裁切与肤色风险收紧并记录钳制；真实任务最终进入 `ready`，生成 12 项安全参数，1 项被风险规则收紧。
+- Compose 迁移新增 `schema_migrations` 台账，避免每次重启重复运行旧状态约束；在已有 `planning` 数据时连续两次启动均成功。
+- Web 回归测试、Web 生产构建/TypeScript、36 项 Worker 测试和真实 DashScope 规划调用均通过。
