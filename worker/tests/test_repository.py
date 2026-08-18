@@ -69,3 +69,19 @@ class TaskRepositoryTest(unittest.TestCase):
         self.assertTrue(stored)
         self.assertEqual(connection.execute.call_count, 2)
         self.assertIn("INSERT INTO image_measurements", connection.execute.call_args.args[0])
+
+    @patch("app.repository.psycopg.connect")
+    def test_safe_plan_is_not_stored_after_task_leaves_validation(self, connect) -> None:
+        connection = MagicMock()
+        connect.return_value.__enter__.return_value = connection
+        connection.execute.return_value.fetchone.return_value = None
+        repository = TaskRepository("postgresql://example.test/database")
+
+        stored = repository.complete_plan(
+            "cancelled-task", 1, "qwen", "response-id", "1", "1.0",
+            {"style_name": "draft"}, {"style_name": "safe", "validation_notes": []},
+        )
+
+        self.assertFalse(stored)
+        self.assertEqual(connection.execute.call_count, 1)
+        self.assertNotIn("INSERT INTO lightroom_plans", connection.execute.call_args.args[0])

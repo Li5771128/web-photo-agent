@@ -12,6 +12,12 @@ class AnalysisJobTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             AnalysisJob.from_json('{"version": 2, "taskId": "task-123"}')
 
+    def test_parses_planning_retry_job(self) -> None:
+        job = AnalysisJob.from_json('{"version": 2, "kind": "plan", "taskId": "task-123"}')
+
+        self.assertEqual(job.kind, "plan")
+        self.assertEqual(job.task_id, "task-123")
+
 
 if __name__ == "__main__":
     unittest.main()

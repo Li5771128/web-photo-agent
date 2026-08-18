@@ -47,7 +47,7 @@ try {
   if ($snapshot.status -ne "vision_failed" -or $snapshot.errorCode -ne "dashscope_api_key_missing") {
     throw "Measurement smoke task did not stop safely before Qwen"
   }
-  if ($snapshot.measurements.schemaVersion -ne 1 -or -not $snapshot.measurements.reference -or -not $snapshot.measurements.target -or -not $snapshot.measurements.comparison) {
+  if ($snapshot.measurements.schemaVersion -ne 2 -or -not $snapshot.measurements.reference.rgb_histogram -or -not $snapshot.measurements.target.rgb_histogram -or -not $snapshot.measurements.comparison) {
     throw "Task API did not return complete deterministic measurements"
   }
   Write-Output "Deterministic measurement smoke test passed without calling Qwen."

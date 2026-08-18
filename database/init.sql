@@ -3,7 +3,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS color_tasks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   session_hash char(64) NOT NULL,
-  status text NOT NULL CHECK (status IN ('collecting', 'queued', 'queue_failed', 'measuring', 'measurement_failed', 'recognizing', 'vision_ready', 'vision_failed', 'cancelled', 'expired')),
+  status text NOT NULL CHECK (status IN ('collecting', 'queued', 'queue_failed', 'measuring', 'measurement_failed', 'recognizing', 'vision_ready', 'vision_failed', 'planning', 'planning_failed', 'validating', 'validation_failed', 'ready', 'cancelled', 'expired')),
   error_code text,
   worker_received_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -46,5 +46,26 @@ CREATE TABLE IF NOT EXISTS image_measurements (
   reference_result jsonb NOT NULL,
   target_result jsonb NOT NULL,
   comparison_result jsonb NOT NULL,
+  completed_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS vision_analyses (
+  task_id uuid PRIMARY KEY REFERENCES color_tasks(id) ON DELETE CASCADE,
+  model_name text NOT NULL,
+  provider_response_id text,
+  result jsonb NOT NULL,
+  completed_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS lightroom_plans (
+  task_id uuid PRIMARY KEY REFERENCES color_tasks(id) ON DELETE CASCADE,
+  schema_version integer NOT NULL CHECK (schema_version > 0),
+  model_name text NOT NULL,
+  provider_response_id text,
+  prompt_version text NOT NULL,
+  validator_version text NOT NULL,
+  draft jsonb NOT NULL,
+  safe_plan jsonb NOT NULL,
+  validation_notes jsonb NOT NULL DEFAULT '[]'::jsonb,
   completed_at timestamptz NOT NULL DEFAULT now()
 );

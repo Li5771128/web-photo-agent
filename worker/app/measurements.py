@@ -6,7 +6,8 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+RGB_HISTOGRAM_BINS = 32
 
 
 def _rounded(value: float) -> float:
@@ -45,6 +46,19 @@ def _hue_histogram(srgb: np.ndarray, saturation: np.ndarray) -> list[float]:
     if counts.sum() == 0:
         return [0.0] * 12
     return [_rounded(value) for value in counts / counts.sum()]
+
+
+def _rgb_histogram(srgb: np.ndarray) -> dict[str, Any]:
+    pixels = srgb.reshape(-1, 3)
+    channels: dict[str, list[float]] = {}
+    for index, name in enumerate(("red", "green", "blue")):
+        counts, _edges = np.histogram(pixels[:, index], bins=RGB_HISTOGRAM_BINS, range=(0.0, 1.0))
+        channels[name] = [_rounded(value) for value in counts.astype(np.float64) / pixels.shape[0]]
+    return {
+        "bins": RGB_HISTOGRAM_BINS,
+        "sample_count": int(pixels.shape[0]),
+        "channels": channels,
+    }
 
 
 def _dominant_colors(srgb: np.ndarray) -> list[dict[str, Any]]:
@@ -122,6 +136,7 @@ def measure_image(
             "warmth": _rounded(np.clip(warmth, -1.0, 1.0)),
             "green_magenta": _rounded(np.clip(green_magenta, -1.0, 1.0)),
         },
+        "rgb_histogram": _rgb_histogram(srgb),
         "hue_histogram": _hue_histogram(srgb, saturation_image),
         "dominant_colors": _dominant_colors(srgb),
         "edge_activity": _edge_activity(luminance),
@@ -183,6 +198,7 @@ def validate_measurement(result: dict[str, Any]) -> None:
         *result["hue_histogram"],
         *(color["fraction"] for color in result["dominant_colors"]),
         result["edge_activity"],
+        *(value for channel in result["rgb_histogram"]["channels"].values() for value in channel),
     ]
     if any(float(value) < 0.0 or float(value) > 1.0 for value in proportions):
         raise ValueError("measurement proportions must be between zero and one")
@@ -191,6 +207,15 @@ def validate_measurement(result: dict[str, Any]) -> None:
     hue_total = sum(float(value) for value in result["hue_histogram"])
     if hue_total != 0.0 and not math.isclose(hue_total, 1.0, abs_tol=1e-5):
         raise ValueError("measurement hue histogram must be normalized")
+    histogram = result["rgb_histogram"]
+    if histogram.get("bins") != RGB_HISTOGRAM_BINS or histogram.get("sample_count", 0) <= 0:
+        raise ValueError("measurement RGB histogram metadata is invalid")
+    for channel in ("red", "green", "blue"):
+        values = histogram.get("channels", {}).get(channel)
+        if not isinstance(values, list) or len(values) != RGB_HISTOGRAM_BINS:
+            raise ValueError("measurement RGB histogram bins are invalid")
+        if not math.isclose(sum(float(value) for value in values), 1.0, abs_tol=1e-5):
+            raise ValueError("measurement RGB histogram must be normalized")
 
 
 def validate_comparison(result: dict[str, Any]) -> None:

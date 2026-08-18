@@ -31,7 +31,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tas
      FROM color_tasks t
      JOIN task_assets a ON a.task_id = t.id AND a.role = $3
      WHERE t.id = $1 AND t.session_hash = $2 AND t.expires_at > now()
-       AND t.status IN ('queued', 'queue_failed', 'measuring', 'measurement_failed', 'recognizing', 'vision_ready', 'vision_failed')`,
+       AND t.status IN ('queued', 'queue_failed', 'measuring', 'measurement_failed', 'recognizing', 'vision_ready', 'vision_failed', 'planning', 'planning_failed', 'validating', 'validation_failed', 'ready')`,
     [taskId, session.hash, retainedRole],
   );
   if (source.rowCount !== 1) {
@@ -59,7 +59,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tas
       const oldTask = await client.query(
         `SELECT status FROM color_tasks
          WHERE id = $1 AND session_hash = $2 AND expires_at > now()
-           AND status IN ('queued', 'queue_failed', 'measuring', 'measurement_failed', 'recognizing', 'vision_ready', 'vision_failed')
+           AND status IN ('queued', 'queue_failed', 'measuring', 'measurement_failed', 'recognizing', 'vision_ready', 'vision_failed', 'planning', 'planning_failed', 'validating', 'validation_failed', 'ready')
          FOR UPDATE`,
         [taskId, session.hash],
       );

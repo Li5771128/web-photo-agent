@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from .prompts import VISION_INSTRUCTIONS, VISION_REQUEST
+from .prompts import PLANNING_INSTRUCTIONS, PLANNING_REQUEST, VISION_INSTRUCTIONS, VISION_REQUEST
 
 
 class VisionProviderError(Exception):
@@ -152,3 +152,31 @@ class QwenVisionClient:
                     raise VisionProviderError("vision_response_invalid")
                 return value
         raise VisionProviderError("vision_provider_failed", retryable=True)
+
+
+class QwenPlanningClient(QwenVisionClient):
+    def plan(self, context: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+        payload = {
+            "model": self.model,
+            "store": False,
+            "instructions": PLANNING_INSTRUCTIONS,
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": PLANNING_REQUEST + "\ninput_context:\n" + json.dumps(context, ensure_ascii=False),
+                        }
+                    ],
+                }
+            ],
+        }
+        try:
+            response_data = self._post_with_retries(payload)
+            result = _parse_json_text(_extract_output_text(response_data))
+        except VisionProviderError as error:
+            code = "planning_response_invalid" if error.code == "vision_response_invalid" else "planning_provider_failed"
+            raise VisionProviderError(code, error.retryable) from error
+        response_id = response_data.get("id")
+        return result, response_id if isinstance(response_id, str) else None

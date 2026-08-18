@@ -13,7 +13,7 @@ class ImageMeasurementTest(unittest.TestCase):
 
         result = measure_image(image, source_kind="standard")
 
-        self.assertEqual(result["schema_version"], 1)
+        self.assertEqual(result["schema_version"], 2)
         self.assertAlmostEqual(result["luminance"]["p50"], 0.215861, places=6)
         self.assertEqual(result["tonal_regions"]["black_clip_fraction"], 0.333333)
         self.assertEqual(result["tonal_regions"]["white_clip_fraction"], 0.333333)
@@ -40,6 +40,24 @@ class ImageMeasurementTest(unittest.TestCase):
         self.assertEqual(result["hue_histogram"][8], 0.25)
         self.assertEqual(result["dominant_colors"][0], {"hex": "#ff0000", "fraction": 0.75})
         self.assertEqual(result["dominant_colors"][1], {"hex": "#0000ff", "fraction": 0.25})
+
+    def test_reports_normalized_deterministic_rgb_histograms(self) -> None:
+        image = Image.new("RGB", (4, 1))
+        image.putdata([(0, 64, 255), (0, 64, 255), (128, 64, 255), (255, 64, 0)])
+
+        first = measure_image(image, source_kind="standard")
+        second = measure_image(image, source_kind="standard")
+        histogram = first["rgb_histogram"]
+
+        self.assertEqual(histogram, second["rgb_histogram"])
+        self.assertEqual(histogram["bins"], 32)
+        self.assertEqual(histogram["sample_count"], 4)
+        self.assertEqual(len(histogram["channels"]["red"]), 32)
+        self.assertAlmostEqual(sum(histogram["channels"]["red"]), 1.0, places=5)
+        self.assertAlmostEqual(sum(histogram["channels"]["green"]), 1.0, places=5)
+        self.assertAlmostEqual(sum(histogram["channels"]["blue"]), 1.0, places=5)
+        self.assertEqual(histogram["channels"]["red"][0], 0.5)
+        self.assertEqual(histogram["channels"]["blue"][31], 0.75)
 
     def test_distinguishes_flat_and_high_contrast_edge_content(self) -> None:
         flat = measure_image(Image.new("RGB", (4, 4), (128, 128, 128)), source_kind="standard")

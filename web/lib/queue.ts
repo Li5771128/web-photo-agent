@@ -14,6 +14,10 @@ export async function enqueueAnalysis(taskId: string): Promise<void> {
   await getRedis().lpush(ANALYSIS_QUEUE, JSON.stringify({ version: 2, kind: "analyze", taskId, enqueuedAt: new Date().toISOString() }));
 }
 
+export async function enqueuePlanning(taskId: string): Promise<void> {
+  await getRedis().lpush(ANALYSIS_QUEUE, JSON.stringify({ version: 2, kind: "plan", taskId, enqueuedAt: new Date().toISOString() }));
+}
+
 export async function enqueuePreview(taskId: string, role: "reference" | "target", objectKey: string): Promise<void> {
   await getRedis().lpush(ANALYSIS_QUEUE, JSON.stringify({
     version: 2,

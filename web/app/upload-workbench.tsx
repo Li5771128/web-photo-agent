@@ -1,9 +1,10 @@
 "use client";
 
 import { ChangeEvent, useEffect, useRef, useState } from "react";
+import { AnalysisResults, LightroomPlan, Measurements, VisionResult } from "./analysis-results";
 
 type Role = "reference" | "target";
-type TaskStatus = "collecting" | "queued" | "queue_failed" | "measuring" | "measurement_failed" | "recognizing" | "vision_ready" | "vision_failed" | "cancelled" | "expired";
+type TaskStatus = "collecting" | "queued" | "queue_failed" | "measuring" | "measurement_failed" | "recognizing" | "vision_ready" | "vision_failed" | "planning" | "planning_failed" | "validating" | "validation_failed" | "ready" | "cancelled" | "expired";
 type AssetState = {
   status: "empty" | "uploading" | "confirmed" | "failed";
   errorCode?: string | null;
@@ -20,7 +21,8 @@ type TaskState = {
   errorCode?: string | null;
   visionModel?: string | null;
   visionResult?: VisionResult | null;
-  measurements?: unknown;
+  measurements?: Measurements | null;
+  lightroomPlan?: LightroomPlan | null;
   assets: Record<Role, AssetState>;
 };
 type UploadPhase = "idle" | "uploading" | "confirming" | "success" | "error";
@@ -34,15 +36,6 @@ type UploadState = {
   lastProgressAt: number;
   stalled: boolean;
   error: string | null;
-};
-type ImageSummary = { scene_type: string; subjects: string[]; has_people: boolean; skin_tone_notes: string | null; lighting: string };
-type VisionResult = {
-  reference: ImageSummary;
-  target: ImageSummary;
-  transferable_features: string[];
-  non_transferable_features: string[];
-  matching_limits: string[];
-  planning_risks: string[];
 };
 type ApiError = { error?: { code?: string; message?: string } };
 
@@ -72,6 +65,9 @@ const errorMessages: Record<string, string> = {
   measurement_calculation_failed: "本地图像测量失败，请稍后重试。",
   vision_provider_failed: "千问服务调用失败，请检查 API Key、模型权限或稍后重试。",
   vision_response_invalid: "千问返回的识图结果格式无效，请重新尝试。",
+  planning_provider_failed: "千问参数规划调用失败，测量与识图结果已保留。",
+  planning_response_invalid: "千问返回的参数草案格式无效，测量与识图结果已保留。",
+  plan_validation_failed: "参数草案未通过本地安全校验，请重新生成。",
   queue_unavailable: "任务队列暂时不可用，请稍后重试。",
 };
 
@@ -94,7 +90,10 @@ function statusCopy(task: TaskState): { title: string; detail: string; tone: "su
   if (task.status === "queued") return { title: "任务已进入队列", detail: "正在等待 Python Worker…", tone: "success" };
   if (task.status === "measuring") return { title: "正在进行图像测量", detail: "本地计算亮度、色彩、对比度与 A/B 差异…", tone: "success" };
   if (task.status === "recognizing") return { title: "千问正在理解图片内容", detail: "正在分析场景、主体、人物与光线条件…", tone: "success" };
-  if (task.status === "vision_ready") return { title: "图片内容理解完成", detail: `模型 ${task.visionModel ?? "qwen3.7-max"}`, tone: "success" };
+  if (task.status === "vision_ready") return { title: "图片内容理解完成", detail: "可以继续生成 Lightroom 参数计划。", tone: "success" };
+  if (task.status === "planning") return { title: "正在生成 Lightroom 参数草案", detail: "根据确定性读数与内容理解生成 8–12 项高价值调整…", tone: "success" };
+  if (task.status === "validating") return { title: "正在校验参数安全性", detail: "本地检查参数白名单、范围、素材格式与图像风险…", tone: "success" };
+  if (task.status === "ready") return { title: "分析与参数计划完成", detail: `模型 ${task.visionModel ?? "qwen3.7-max"} · 已通过本地校验`, tone: "success" };
   const detail = task.errorCode ? errorMessages[task.errorCode] ?? "任务失败，请更换图片或重试。" : "任务未完成，请重试。";
   return { title: "任务未完成", detail, tone: "error" };
 }
@@ -143,24 +142,6 @@ function UploadCard({
   );
 }
 
-function SummaryCard({ label, summary }: { label: string; summary: ImageSummary }) {
-  return <article className="summary-card"><p className="step">{label}</p><h3>{summary.scene_type}</h3><dl>
-    <div><dt>主体</dt><dd>{summary.subjects.join("、")}</dd></div><div><dt>光线</dt><dd>{summary.lighting}</dd></div>
-    <div><dt>人物</dt><dd>{summary.has_people ? "检测到人物" : "未检测到人物"}</dd></div>
-    {summary.skin_tone_notes && <div><dt>肤色提示</dt><dd>{summary.skin_tone_notes}</dd></div>}
-  </dl></article>;
-}
-function InsightList({ title, items }: { title: string; items: string[] }) {
-  return <section className="insight-list"><h3>{title}</h3><ul>{items.map((item) => <li key={item}>{item}</li>)}</ul></section>;
-}
-function VisionReport({ result }: { result: VisionResult }) {
-  return <section className="vision-report" aria-labelledby="vision-report-title"><div className="report-heading"><p className="step">步骤 2 / 3</p><h2 id="vision-report-title">图片内容理解</h2></div>
-    <div className="summary-grid"><SummaryCard label="参考图 A" summary={result.reference} /><SummaryCard label="目标图 B" summary={result.target} /></div>
-    <div className="insight-grid"><InsightList title="可迁移特征" items={result.transferable_features} /><InsightList title="不可直接迁移" items={result.non_transferable_features} /><InsightList title="匹配限制" items={result.matching_limits} /><InsightList title="规划风险" items={result.planning_risks} /></div>
-    <p className="measurement-note">这是语义识图结果，不是亮度、直方图或色彩数值测量。确定性测量将在下一阶段接入。</p>
-  </section>;
-}
-
 export function UploadWorkbench() {
   const [task, setTaskState] = useState<TaskState | null>(null);
   const [uploads, setUploads] = useState<Record<Role, UploadState>>({ reference: emptyUpload(), target: emptyUpload() });
@@ -206,7 +187,7 @@ export function UploadWorkbench() {
       && task.assets.target?.status === "confirmed"
       && task.assets.target?.isRaw
       && !task.assets.target?.previewReady;
-    if (!task || (!["queued", "measuring", "recognizing"].includes(task.status) && !rawPreviewPending)) return;
+    if (!task || (!["queued", "measuring", "recognizing", "vision_ready", "planning", "validating"].includes(task.status) && !rawPreviewPending)) return;
     const timer = window.setInterval(async () => {
       const response = await fetch(`/api/tasks/${task.id}`, { cache: "no-store" });
       if (!response.ok) return;
@@ -367,19 +348,28 @@ export function UploadWorkbench() {
   const bothConfirmed = task?.assets.reference?.status === "confirmed" && task.assets.target?.status === "confirmed";
   const rawPreviewPending = Boolean(task?.assets.target?.isRaw && !task.assets.target?.previewReady);
   const showAnalysisConfirmation = Boolean(task && bothConfirmed && ["collecting", "queue_failed"].includes(task.status));
+  const hasResults = Boolean(task?.visionResult && task.measurements);
+  const workflowStage = hasResults ? 3 : task && !["collecting", "queue_failed"].includes(task.status) ? 2 : 1;
   return <section className="workbench" aria-labelledby="upload-title">
-    <div className="section-heading"><div><p className="step">步骤 1 / 3</p><h2 id="upload-title">上传图片对</h2></div><p>A/B 选择后独立自动上传。普通图片最大 30 MB；目标图 B 的 RAW 最大 40 MB。</p></div>
-    <p className="privacy-note">RAW 需上传后生成预览；上传期间暂不显示缩略图。系统只将去除 EXIF、长边不超过 1024px 的 A/B 预览发送给阿里云百炼，不发送原始分辨率文件。</p>
-    <div className="upload-grid"><UploadCard role="reference" state={uploads.reference} onSelect={(event) => void selectFile("reference", event)} /><UploadCard role="target" state={uploads.target} onSelect={(event) => void selectFile("target", event)} /></div>
+    <nav className="flow-steps" aria-label="分析流程">{["上传图片", "图像分析", "查看结果"].map((label, index) => <div className={`${workflowStage === index + 1 ? "active" : ""} ${workflowStage > index + 1 ? "done" : ""}`} key={label}><span>{workflowStage > index + 1 ? "✓" : index + 1}</span><strong>{label}</strong></div>)}</nav>
+    <div className="section-heading"><div><p className="step">步骤 {workflowStage} / 3</p><h2 id="upload-title">{workflowStage === 1 ? "上传图片对" : workflowStage === 2 ? "正在分析图片对" : "分析结果"}</h2></div><p>{workflowStage === 1 ? "A/B 选择后独立自动上传。普通图片最大 30 MB；目标图 B 的 RAW 最大 40 MB。" : workflowStage === 2 ? "测量、内容理解与参数规划依次执行；分析阶段不显示模拟百分比。" : "所有读数默认展开；你仍可以单独更换 A 或 B 重新分析。"}</p></div>
+    {workflowStage === 1 && <p className="privacy-note">RAW 需上传后生成预览；上传期间暂不显示缩略图。系统只将去除 EXIF、长边不超过 1024px 的 A/B 预览发送给阿里云百炼，不发送原始分辨率文件。</p>}
+    <div className={`upload-grid ${workflowStage > 1 ? "compact" : ""}`}><UploadCard role="reference" state={uploads.reference} onSelect={(event) => void selectFile("reference", event)} /><UploadCard role="target" state={uploads.target} onSelect={(event) => void selectFile("target", event)} /></div>
     {showAnalysisConfirmation && <div className="analysis-confirmation">
       <button className="primary" type="button" disabled={confirmingAnalysis || rawPreviewPending} onClick={() => void confirmAnalysis()}>
         {confirmingAnalysis ? "正在提交…" : rawPreviewPending ? "RAW 预览生成中…" : "确认分析"}
       </button>
       <p>{rawPreviewPending ? "请等待 RAW 预览生成并核对图片。" : "点击后才会开始图片内容理解。"}</p>
     </div>}
+    {task && ["vision_ready", "planning_failed", "validation_failed"].includes(task.status) && <div className="analysis-confirmation retry-planning">
+      <button className="primary" type="button" disabled={confirmingAnalysis} onClick={() => void confirmAnalysis()}>
+        {confirmingAnalysis ? "正在重新提交…" : "重新生成参数计划"}
+      </button>
+      <p>将复用已完成的图像测量和内容理解，不会重新上传或再次识图。</p>
+    </div>}
     {task && <button className="secondary" type="button" onClick={() => void restart()}>重新开始</button>}
     {message && <p className="notice error" role="alert">{message}</p>}
     {task && copy && <div className={`notice ${copy.tone}`} aria-live="polite"><strong>{copy.title}</strong><span>任务 {task.id.slice(0, 8)} · 状态 {task.status}</span><span>{copy.detail}</span></div>}
-    {task?.status === "vision_ready" && task.visionResult && <VisionReport result={task.visionResult} />}
+    {task?.visionResult && task.measurements && <AnalysisResults taskId={task.id} vision={task.visionResult} measurements={task.measurements} plan={task.lightroomPlan} />}
   </section>;
 }

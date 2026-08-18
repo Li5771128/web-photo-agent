@@ -3,7 +3,7 @@ import unittest
 
 import httpx
 
-from app.qwen import QwenVisionClient, VisionProviderError
+from app.qwen import QwenPlanningClient, QwenVisionClient, VisionProviderError
 
 
 VALID_RESULT = {
@@ -105,6 +105,29 @@ class QwenVisionClientTest(unittest.TestCase):
         with self.assertRaisesRegex(VisionProviderError, "vision_provider_failed"):
             client.analyze(b"a", b"b")
         self.assertEqual(calls, 1)
+
+    def test_planning_request_contains_text_only_and_disables_storage(self) -> None:
+        observed: dict = {}
+        draft = {"style_name": "暖调", "summary": "测试", "parameters": []}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            observed.update(json.loads(request.content))
+            return httpx.Response(200, json=response_with_text(json.dumps(draft, ensure_ascii=False)))
+
+        client = QwenPlanningClient(
+            "test-key", "https://example.test/v1", "qwen3.7-max",
+            transport=httpx.MockTransport(handler), sleeper=lambda _seconds: None,
+        )
+        result, response_id = client.plan({"reference": {"luminance": {"mean": 0.5}}})
+
+        self.assertEqual(result, draft)
+        self.assertEqual(response_id, "resp-test")
+        self.assertFalse(observed["store"])
+        content = observed["input"][0]["content"]
+        self.assertTrue(all(item["type"] == "input_text" for item in content))
+        serialized = json.dumps(observed)
+        self.assertNotIn("input_image", serialized)
+        self.assertNotIn("image_url", serialized)
 
 
 if __name__ == "__main__":

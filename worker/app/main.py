@@ -11,7 +11,9 @@ from PIL import UnidentifiedImageError
 from .config import Settings
 from .images import ImageColorProfileError, RawDecodeError, create_vision_preview, decode_measurement_image
 from .measurements import SCHEMA_VERSION, compare_measurements, measure_image, validate_comparison, validate_measurement
-from .qwen import QwenVisionClient, VisionProviderError
+from .planner import PLAN_SCHEMA_VERSION, VALIDATOR_VERSION, planning_context, validate_plan
+from .prompts import PLANNING_PROMPT_VERSION
+from .qwen import QwenPlanningClient, QwenVisionClient, VisionProviderError
 from .repository import TaskRepository
 from .storage import AssetStorage
 
@@ -34,13 +36,13 @@ class WorkerJob:
             raise ValueError("unsupported worker job")
         if value.get("version") == 1:
             return cls(kind="analyze", task_id=value["taskId"])
-        if value.get("version") != 2 or value.get("kind") not in ("analyze", "prepare_preview"):
+        if value.get("version") != 2 or value.get("kind") not in ("analyze", "plan", "prepare_preview"):
             raise ValueError("unsupported worker job")
         if value["kind"] == "prepare_preview":
             if value.get("role") not in ("reference", "target") or not isinstance(value.get("objectKey"), str):
                 raise ValueError("invalid preview job")
             return cls(kind=value["kind"], task_id=value["taskId"], role=value["role"], object_key=value["objectKey"])
-        return cls(kind="analyze", task_id=value["taskId"])
+        return cls(kind=value["kind"], task_id=value["taskId"])
 
 
 # Keep the original import name available for existing callers while job envelopes
@@ -55,6 +57,11 @@ class Worker:
         self.repository = TaskRepository(self.settings.database_url)
         self.storage = AssetStorage(self.settings)
         self.vision = QwenVisionClient(
+            api_key=self.settings.dashscope_api_key,
+            base_url=self.settings.dashscope_base_url,
+            model=self.settings.dashscope_model,
+        )
+        self.planning = QwenPlanningClient(
             api_key=self.settings.dashscope_api_key,
             base_url=self.settings.dashscope_base_url,
             model=self.settings.dashscope_model,
@@ -242,14 +249,90 @@ class Worker:
             logger.exception("Task %s vision request failed unexpectedly", job.task_id)
             return
 
-        if self.repository.complete(job.task_id, self.settings.dashscope_model, response_id, result):
-            logger.info("Completed Qwen visual recognition for task %s", job.task_id)
-        else:
+        if not self.repository.complete(job.task_id, self.settings.dashscope_model, response_id, result):
             logger.info("Discarded Qwen result for cancelled task %s", job.task_id)
+            return
+        logger.info("Completed Qwen visual recognition for task %s", job.task_id)
+
+        self._run_planning(
+            job.task_id,
+            reference_measurement,
+            target_measurement,
+            comparison,
+            result,
+            assets.target_is_raw,
+        )
+
+    def _run_planning(
+        self,
+        task_id: str,
+        reference_measurement: dict,
+        target_measurement: dict,
+        comparison: dict,
+        result: dict,
+        target_is_raw: bool,
+    ) -> None:
+        context = planning_context(
+            reference_measurement,
+            target_measurement,
+            comparison,
+            result,
+            target_is_raw,
+        )
+        try:
+            draft, planning_response_id = self.planning.plan(context)
+        except VisionProviderError as error:
+            self.repository.fail_plan(task_id, error.code)
+            logger.warning("Task %s planning request failed with %s", task_id, error.code)
+            return
+        except Exception:
+            self.repository.fail_plan(task_id, "planning_provider_failed")
+            logger.exception("Task %s planning request failed unexpectedly", task_id)
+            return
+
+        if not self.repository.begin_validation(task_id):
+            logger.info("Discarded planning draft for cancelled task %s", task_id)
+            return
+        try:
+            safe_plan = validate_plan(draft, target_measurement, result, comparison, target_is_raw)
+        except (KeyError, TypeError, ValueError):
+            self.repository.fail_plan(task_id, "plan_validation_failed")
+            logger.warning("Task %s planning draft failed deterministic validation", task_id)
+            return
+
+        if self.repository.complete_plan(
+            task_id,
+            PLAN_SCHEMA_VERSION,
+            self.settings.dashscope_model,
+            planning_response_id,
+            PLANNING_PROMPT_VERSION,
+            VALIDATOR_VERSION,
+            draft,
+            safe_plan,
+        ):
+            logger.info("Completed safe Lightroom plan for task %s", task_id)
+        else:
+            logger.info("Discarded safe Lightroom plan for cancelled task %s", task_id)
+
+    def process_planning(self, job: WorkerJob) -> None:
+        inputs = self.repository.load_planning_inputs(job.task_id)
+        if inputs is None:
+            logger.warning("Skipped unknown, expired, inactive, or incomplete planning task %s", job.task_id)
+            return
+        self._run_planning(
+            job.task_id,
+            inputs.reference,
+            inputs.target,
+            inputs.comparison,
+            inputs.vision,
+            inputs.target_is_raw,
+        )
 
     def process(self, job: WorkerJob) -> None:
         if job.kind == "prepare_preview":
             self.prepare_preview(job)
+        elif job.kind == "plan":
+            self.process_planning(job)
         else:
             self.process_analysis(job)
 

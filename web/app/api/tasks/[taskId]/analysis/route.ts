@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDatabase, transaction } from "../../../../../lib/database";
-import { enqueueAnalysis } from "../../../../../lib/queue";
+import { enqueueAnalysis, enqueuePlanning } from "../../../../../lib/queue";
 import { getOrCreateSession } from "../../../../../lib/session";
 
 export const runtime = "nodejs";
@@ -25,7 +25,16 @@ export async function POST(_request: Request, { params }: { params: Promise<{ ta
       );
       if (task.rowCount !== 1) throw new AnalysisNotReadyError("task_not_found", "任务不存在或已过期。");
       const status = task.rows[0].status as string;
-      if (["queued", "measuring", "recognizing", "vision_ready"].includes(status)) return { status, shouldEnqueue: false };
+      if (["queued", "measuring", "recognizing", "planning", "validating", "ready"].includes(status)) return { status, shouldEnqueue: false, kind: "analyze" as const };
+      if (["vision_ready", "planning_failed", "validation_failed"].includes(status)) {
+        const planning = await client.query(
+          `UPDATE color_tasks SET status = 'planning', error_code = NULL, updated_at = now()
+           WHERE id = $1 AND status IN ('vision_ready', 'planning_failed', 'validation_failed')
+           RETURNING status`,
+          [taskId],
+        );
+        return { status: planning.rows[0]?.status ?? status, shouldEnqueue: planning.rowCount === 1, kind: "plan" as const };
+      }
       if (!["collecting", "queue_failed"].includes(status)) {
         throw new AnalysisNotReadyError("task_not_confirmable", "当前任务无法开始分析，请重新开始。");
       }
@@ -52,14 +61,17 @@ export async function POST(_request: Request, { params }: { params: Promise<{ ta
          RETURNING status`,
         [taskId],
       );
-      return { status: queued.rows[0]?.status ?? status, shouldEnqueue: queued.rowCount === 1 };
+      return { status: queued.rows[0]?.status ?? status, shouldEnqueue: queued.rowCount === 1, kind: "analyze" as const };
     });
 
     if (result.shouldEnqueue) {
-      try { await enqueueAnalysis(taskId); }
+      try { await (result.kind === "plan" ? enqueuePlanning(taskId) : enqueueAnalysis(taskId)); }
       catch (error) {
         await getDatabase().query(
-          "UPDATE color_tasks SET status = 'queue_failed', error_code = 'queue_unavailable', updated_at = now() WHERE id = $1 AND status = 'queued'",
+          `UPDATE color_tasks
+           SET status = CASE WHEN status = 'planning' THEN 'planning_failed' ELSE 'queue_failed' END,
+               error_code = 'queue_unavailable', updated_at = now()
+           WHERE id = $1 AND status IN ('queued', 'planning')`,
           [taskId],
         );
         console.error("analysis enqueue failed", { taskId, error });

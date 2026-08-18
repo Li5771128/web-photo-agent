@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getDatabase, transaction } from "./database";
 
-export type TaskStatus = "collecting" | "queued" | "queue_failed" | "measuring" | "measurement_failed" | "recognizing" | "vision_ready" | "vision_failed" | "cancelled" | "expired";
+export type TaskStatus = "collecting" | "queued" | "queue_failed" | "measuring" | "measurement_failed" | "recognizing" | "vision_ready" | "vision_failed" | "planning" | "planning_failed" | "validating" | "validation_failed" | "ready" | "cancelled" | "expired";
 
 export async function createTask(sessionHash: string, ttlHours: number): Promise<{ id: string; expiresAt: Date }> {
   const id = randomUUID();
@@ -24,6 +24,7 @@ export async function getTaskSnapshot(taskId: string, sessionHash: string): Prom
     `SELECT t.id, t.status, t.error_code AS "errorCode",
             t.worker_received_at AS "workerReceivedAt", t.expires_at AS "expiresAt",
             v.model_name AS "visionModel", v.result AS "visionResult",
+            p.safe_plan AS "lightroomPlan",
             CASE WHEN m.task_id IS NULL THEN NULL ELSE jsonb_build_object(
               'schemaVersion', m.schema_version,
               'reference', m.reference_result,
@@ -50,8 +51,9 @@ export async function getTaskSnapshot(taskId: string, sessionHash: string): Prom
      LEFT JOIN task_assets a ON a.task_id = t.id AND a.role = s.role
      LEFT JOIN vision_analyses v ON v.task_id = t.id
      LEFT JOIN image_measurements m ON m.task_id = t.id
+     LEFT JOIN lightroom_plans p ON p.task_id = t.id
      WHERE t.id = $1 AND t.session_hash = $2 AND t.expires_at > now()
-     GROUP BY t.id, v.model_name, v.result, m.task_id, m.schema_version, m.reference_result,
+     GROUP BY t.id, v.model_name, v.result, p.safe_plan, m.task_id, m.schema_version, m.reference_result,
               m.target_result, m.comparison_result, m.completed_at`,
     [taskId, sessionHash],
   );

@@ -15,6 +15,15 @@ class TaskAssets:
     target_is_raw: bool
 
 
+@dataclass(frozen=True)
+class PlanningInputs:
+    reference: dict[str, Any]
+    target: dict[str, Any]
+    comparison: dict[str, Any]
+    vision: dict[str, Any]
+    target_is_raw: bool
+
+
 class TaskRepository:
     def __init__(self, database_url: str) -> None:
         self.database_url = database_url
@@ -174,7 +183,7 @@ class TaskRepository:
         with psycopg.connect(self.database_url) as connection:
             active = connection.execute(
                 """UPDATE color_tasks
-                   SET status = 'vision_ready', error_code = NULL, updated_at = now()
+                   SET status = 'planning', error_code = NULL, updated_at = now()
                    WHERE id = %s AND status = 'recognizing'
                    RETURNING id""",
                 (task_id,),
@@ -192,6 +201,87 @@ class TaskRepository:
                 (task_id, model, response_id, json.dumps(result, ensure_ascii=False)),
             )
             return True
+
+    def begin_validation(self, task_id: str) -> bool:
+        with psycopg.connect(self.database_url) as connection:
+            changed = connection.execute(
+                """UPDATE color_tasks SET status = 'validating', error_code = NULL, updated_at = now()
+                   WHERE id = %s AND status = 'planning' AND expires_at > now()
+                   RETURNING id""",
+                (task_id,),
+            ).fetchone()
+            return changed is not None
+
+    def load_planning_inputs(self, task_id: str) -> PlanningInputs | None:
+        with psycopg.connect(self.database_url, row_factory=dict_row) as connection:
+            row = connection.execute(
+                """SELECT m.reference_result, m.target_result, m.comparison_result, v.result AS vision,
+                          COALESCE(a.is_raw, false) AS target_is_raw
+                   FROM color_tasks t
+                   JOIN image_measurements m ON m.task_id = t.id
+                   JOIN vision_analyses v ON v.task_id = t.id
+                   JOIN task_assets a ON a.task_id = t.id AND a.role = 'target'
+                   WHERE t.id = %s AND t.status = 'planning' AND t.expires_at > now()""",
+                (task_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return PlanningInputs(
+                row["reference_result"], row["target_result"], row["comparison_result"],
+                row["vision"], bool(row["target_is_raw"]),
+            )
+
+    def complete_plan(
+        self,
+        task_id: str,
+        schema_version: int,
+        model: str,
+        response_id: str | None,
+        prompt_version: str,
+        validator_version: str,
+        draft: dict[str, Any],
+        safe_plan: dict[str, Any],
+    ) -> bool:
+        with psycopg.connect(self.database_url) as connection:
+            active = connection.execute(
+                """UPDATE color_tasks SET status = 'ready', error_code = NULL, updated_at = now()
+                   WHERE id = %s AND status = 'validating' AND expires_at > now()
+                   RETURNING id""",
+                (task_id,),
+            ).fetchone()
+            if active is None:
+                return False
+            connection.execute(
+                """INSERT INTO lightroom_plans
+                     (task_id, schema_version, model_name, provider_response_id, prompt_version,
+                      validator_version, draft, safe_plan, validation_notes, completed_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, now())
+                   ON CONFLICT (task_id) DO UPDATE SET
+                     schema_version = EXCLUDED.schema_version,
+                     model_name = EXCLUDED.model_name,
+                     provider_response_id = EXCLUDED.provider_response_id,
+                     prompt_version = EXCLUDED.prompt_version,
+                     validator_version = EXCLUDED.validator_version,
+                     draft = EXCLUDED.draft,
+                     safe_plan = EXCLUDED.safe_plan,
+                     validation_notes = EXCLUDED.validation_notes,
+                     completed_at = now()""",
+                (
+                    task_id, schema_version, model, response_id, prompt_version, validator_version,
+                    json.dumps(draft, ensure_ascii=False), json.dumps(safe_plan, ensure_ascii=False),
+                    json.dumps(safe_plan.get("validation_notes", []), ensure_ascii=False),
+                ),
+            )
+            return True
+
+    def fail_plan(self, task_id: str, error_code: str) -> None:
+        failure_status = "validation_failed" if error_code == "plan_validation_failed" else "planning_failed"
+        with psycopg.connect(self.database_url) as connection:
+            connection.execute(
+                """UPDATE color_tasks SET status = %s, error_code = %s, updated_at = now()
+                   WHERE id = %s AND status IN ('planning', 'validating')""",
+                (failure_status, error_code, task_id),
+            )
 
     def fail(self, task_id: str, error_code: str, role: str | None = None) -> None:
         with psycopg.connect(self.database_url) as connection:
