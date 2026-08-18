@@ -17,3 +17,9 @@ class AssetStorage:
     def read(self, object_key: str) -> bytes:
         response = self.client.get_object(Bucket=self.bucket, Key=object_key)
         return response["Body"].read()
+
+    def write(self, object_key: str, body: bytes, content_type: str) -> None:
+        self.client.put_object(Bucket=self.bucket, Key=object_key, Body=body, ContentType=content_type)
+
+    def delete(self, object_key: str) -> None:
+        self.client.delete_object(Bucket=self.bucket, Key=object_key)

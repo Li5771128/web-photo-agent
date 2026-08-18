@@ -1,9 +1,10 @@
 import unittest
 from io import BytesIO
+from unittest.mock import patch
 
 from PIL import Image
 
-from app.images import create_vision_preview
+from app.images import RawDecodeError, create_vision_preview
 
 
 class VisionPreviewTest(unittest.TestCase):
@@ -31,6 +32,21 @@ class VisionPreviewTest(unittest.TestCase):
         with Image.open(BytesIO(preview)) as output:
             self.assertEqual(output.size, (320, 180))
             self.assertEqual(output.mode, "RGB")
+
+    @patch("app.images._raw_image")
+    def test_raw_preview_uses_the_same_safe_jpeg_output(self, raw_image) -> None:
+        raw_image.return_value = Image.new("RGB", (1800, 1200), "#637f5b")
+
+        preview = create_vision_preview(b"raw fixture", max_edge=1024, quality=80, is_raw=True)
+
+        with Image.open(BytesIO(preview)) as output:
+            self.assertEqual(output.format, "JPEG")
+            self.assertEqual(output.size, (1024, 683))
+            self.assertEqual(len(output.getexif()), 0)
+
+    def test_invalid_raw_has_a_stable_error(self) -> None:
+        with self.assertRaises(RawDecodeError):
+            create_vision_preview(b"not a raw file", max_edge=1024, quality=80, is_raw=True)
 
 
 if __name__ == "__main__":

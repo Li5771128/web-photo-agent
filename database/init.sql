@@ -3,7 +3,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS color_tasks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   session_hash char(64) NOT NULL,
-  status text NOT NULL CHECK (status IN ('collecting', 'queued', 'queue_failed', 'recognizing', 'vision_ready', 'vision_failed', 'expired')),
+  status text NOT NULL CHECK (status IN ('collecting', 'queued', 'queue_failed', 'recognizing', 'vision_ready', 'vision_failed', 'cancelled', 'expired')),
   error_code text,
   worker_received_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -21,8 +21,21 @@ CREATE TABLE IF NOT EXISTS task_assets (
   original_name text NOT NULL,
   media_type text NOT NULL,
   byte_size integer NOT NULL CHECK (byte_size > 0),
-  width integer NOT NULL CHECK (width > 0),
-  height integer NOT NULL CHECK (height > 0),
+  width integer CHECK (width > 0),
+  height integer CHECK (height > 0),
+  is_raw boolean NOT NULL DEFAULT false,
+  preview_object_key text,
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (task_id, role)
+);
+
+CREATE TABLE IF NOT EXISTS task_upload_slots (
+  task_id uuid NOT NULL REFERENCES color_tasks(id) ON DELETE CASCADE,
+  role text NOT NULL CHECK (role IN ('reference', 'target')),
+  current_attempt_id uuid,
+  generation integer NOT NULL DEFAULT 0 CHECK (generation >= 0),
+  status text NOT NULL DEFAULT 'empty' CHECK (status IN ('empty', 'uploading', 'confirmed', 'failed')),
+  error_code text,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (task_id, role)
 );

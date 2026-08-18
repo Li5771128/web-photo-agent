@@ -1,4 +1,4 @@
-import { CreateBucketCommand, DeleteObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { CopyObjectCommand, CreateBucketCommand, DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getConfig } from "./config";
 
 let client: S3Client | undefined;
@@ -30,4 +30,23 @@ export async function storeObject(key: string, body: Buffer, contentType: string
 export async function deleteObject(key: string): Promise<void> {
   const config = getConfig();
   await getClient().send(new DeleteObjectCommand({ Bucket: config.S3_BUCKET, Key: key }));
+}
+
+export async function copyObject(sourceKey: string, destinationKey: string): Promise<void> {
+  const config = getConfig();
+  await getClient().send(new CopyObjectCommand({
+    Bucket: config.S3_BUCKET,
+    CopySource: `${config.S3_BUCKET}/${sourceKey.split("/").map(encodeURIComponent).join("/")}`,
+    Key: destinationKey,
+  }));
+}
+
+export async function readObject(key: string): Promise<{ body: Uint8Array; contentType: string }> {
+  const config = getConfig();
+  const response = await getClient().send(new GetObjectCommand({ Bucket: config.S3_BUCKET, Key: key }));
+  if (!response.Body) throw new Error("object body unavailable");
+  return {
+    body: await response.Body.transformToByteArray(),
+    contentType: response.ContentType ?? "application/octet-stream",
+  };
 }

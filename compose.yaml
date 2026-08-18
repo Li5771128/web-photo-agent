@@ -13,7 +13,8 @@ services:
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-reftone-local-only}
       S3_BUCKET: ${MINIO_BUCKET:-reftone-uploads}
       SESSION_SECRET: ${SESSION_SECRET:-local-development-secret-change-me}
-      UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-20971520}
+      IMAGE_UPLOAD_MAX_BYTES: ${IMAGE_UPLOAD_MAX_BYTES:-31457280}
+      RAW_UPLOAD_MAX_BYTES: ${RAW_UPLOAD_MAX_BYTES:-41943040}
       TASK_TTL_HOURS: ${TASK_TTL_HOURS:-24}
     ports:
       - "3000:3000"
@@ -58,7 +59,7 @@ services:
     command:
       - sh
       - -c
-      - psql "$${DATABASE_URL}" -v ON_ERROR_STOP=1 -f /database/init.sql && psql "$${DATABASE_URL}" -v ON_ERROR_STOP=1 -f /database/migrations/002-qwen-vision.sql
+      - psql "$${DATABASE_URL}" -v ON_ERROR_STOP=1 -f /database/init.sql && psql "$${DATABASE_URL}" -v ON_ERROR_STOP=1 -f /database/migrations/002-qwen-vision.sql && psql "$${DATABASE_URL}" -v ON_ERROR_STOP=1 -f /database/migrations/003-independent-uploads-and-raw.sql
     volumes:
       - ./database:/database:ro
     depends_on:
