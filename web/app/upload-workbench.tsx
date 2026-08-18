@@ -370,6 +370,6 @@ export function UploadWorkbench() {
     {task && <button className="secondary" type="button" onClick={() => void restart()}>重新开始</button>}
     {message && <p className="notice error" role="alert">{message}</p>}
     {task && copy && <div className={`notice ${copy.tone}`} aria-live="polite"><strong>{copy.title}</strong><span>任务 {task.id.slice(0, 8)} · 状态 {task.status}</span><span>{copy.detail}</span></div>}
-    {task?.visionResult && task.measurements && <AnalysisResults taskId={task.id} vision={task.visionResult} measurements={task.measurements} plan={task.lightroomPlan} />}
+    {task?.visionResult && task.measurements && <AnalysisResults vision={task.visionResult} measurements={task.measurements} plan={task.lightroomPlan} />}
   </section>;
 }

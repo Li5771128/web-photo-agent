@@ -206,7 +206,7 @@ function ResultNavigation() {
   </nav>;
 }
 
-export function AnalysisResults({ taskId, vision, measurements, plan }: { taskId: string; vision: VisionResult; measurements: Measurements; plan?: LightroomPlan | null }) {
+export function AnalysisResults({ vision, measurements, plan }: { vision: VisionResult; measurements: Measurements; plan?: LightroomPlan | null }) {
   const feasibility = plan?.feasibility;
   const feasibilityView = feasibility ? feasibilityPresentation(feasibility.score) : null;
   const feasibilityScore = feasibility ? Math.max(0, Math.min(100, feasibility.score)) : 0;
@@ -217,7 +217,6 @@ export function AnalysisResults({ taskId, vision, measurements, plan }: { taskId
         <div className="feasibility-track" role="progressbar" aria-label="匹配可行度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={feasibilityScore}><i style={{ width: `${feasibilityScore}%` }} /></div>
       </div>}
     </header>
-    <div className="result-previews"><figure><img src={`/api/tasks/${taskId}/assets/reference/preview`} alt="参考图 A 分析预览" /><figcaption>参考图 A · 风格来源</figcaption></figure><figure><img src={`/api/tasks/${taskId}/assets/target/preview`} alt="目标图 B 分析预览" /><figcaption>目标图 B · 调整对象</figcaption></figure></div>
     <ResultNavigation />
     <ComparisonReport comparison={measurements.comparison} />
     {plan ? <PlanReport plan={plan} /> : <section id="result-plan" className="plan-pending result-anchor-target" aria-labelledby="plan-pending-title"><strong id="plan-pending-title">参数计划尚未完成</strong><p>测量和内容理解结果已保留。系统完成规划与本地校验后会在此展示 8–12 项安全调整。</p></section>}

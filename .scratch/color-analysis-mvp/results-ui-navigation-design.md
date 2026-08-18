@@ -1,6 +1,6 @@
 # 结果页视觉与章节导航调整
 
-Status: proposed
+Status: approved
 
 ## 目标
 
