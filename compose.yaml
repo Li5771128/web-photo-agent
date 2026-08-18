@@ -1,0 +1,117 @@
+name: reftone
+
+services:
+  web:
+    build:
+      context: ./web
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-reftone}:${POSTGRES_PASSWORD:-reftone}@postgres:5432/${POSTGRES_DB:-reftone}
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-reftone}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-reftone-local-only}
+      S3_BUCKET: ${MINIO_BUCKET:-reftone-uploads}
+      SESSION_SECRET: ${SESSION_SECRET:-local-development-secret-change-me}
+      UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-20971520}
+      TASK_TTL_HOURS: ${TASK_TTL_HOURS:-24}
+    ports:
+      - "3000:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./worker
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-reftone}:${POSTGRES_PASSWORD:-reftone}@postgres:5432/${POSTGRES_DB:-reftone}
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-reftone}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-reftone-local-only}
+      S3_BUCKET: ${MINIO_BUCKET:-reftone-uploads}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      DASHSCOPE_BASE_URL: ${DASHSCOPE_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      DASHSCOPE_MODEL: ${DASHSCOPE_MODEL:-qwen3.7-max}
+      VISION_MAX_EDGE: ${VISION_MAX_EDGE:-1024}
+      VISION_JPEG_QUALITY: ${VISION_JPEG_QUALITY:-80}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    restart: unless-stopped
+
+  migrate:
+    image: postgres:17-alpine
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-reftone}:${POSTGRES_PASSWORD:-reftone}@postgres:5432/${POSTGRES_DB:-reftone}
+    command:
+      - sh
+      - -c
+      - psql "$${DATABASE_URL}" -v ON_ERROR_STOP=1 -f /database/init.sql && psql "$${DATABASE_URL}" -v ON_ERROR_STOP=1 -f /database/migrations/002-qwen-vision.sql
+    volumes:
+      - ./database:/database:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-reftone}
+      POSTGRES_USER: ${POSTGRES_USER:-reftone}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-reftone}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-07-23T15-54-02Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-reftone}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-reftone-local-only}
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

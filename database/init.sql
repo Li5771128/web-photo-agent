@@ -1,0 +1,28 @@
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS color_tasks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_hash char(64) NOT NULL,
+  status text NOT NULL CHECK (status IN ('collecting', 'queued', 'queue_failed', 'recognizing', 'vision_ready', 'vision_failed', 'expired')),
+  error_code text,
+  worker_received_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS color_tasks_session_hash_idx ON color_tasks (session_hash);
+CREATE INDEX IF NOT EXISTS color_tasks_expires_at_idx ON color_tasks (expires_at);
+
+CREATE TABLE IF NOT EXISTS task_assets (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id uuid NOT NULL REFERENCES color_tasks(id) ON DELETE CASCADE,
+  role text NOT NULL CHECK (role IN ('reference', 'target')),
+  object_key text NOT NULL UNIQUE,
+  original_name text NOT NULL,
+  media_type text NOT NULL,
+  byte_size integer NOT NULL CHECK (byte_size > 0),
+  width integer NOT NULL CHECK (width > 0),
+  height integer NOT NULL CHECK (height > 0),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (task_id, role)
+);
