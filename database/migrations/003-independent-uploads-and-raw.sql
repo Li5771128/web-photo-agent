@@ -1,7 +1,7 @@
 ALTER TABLE color_tasks DROP CONSTRAINT IF EXISTS color_tasks_status_check;
 ALTER TABLE color_tasks
   ADD CONSTRAINT color_tasks_status_check
-  CHECK (status IN ('collecting', 'queued', 'queue_failed', 'recognizing', 'vision_ready', 'vision_failed', 'cancelled', 'expired'));
+  CHECK (status IN ('collecting', 'queued', 'queue_failed', 'measuring', 'measurement_failed', 'recognizing', 'vision_ready', 'vision_failed', 'cancelled', 'expired'));
 
 ALTER TABLE task_assets ALTER COLUMN width DROP NOT NULL;
 ALTER TABLE task_assets ALTER COLUMN height DROP NOT NULL;

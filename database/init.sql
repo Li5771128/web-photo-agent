@@ -3,7 +3,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS color_tasks (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   session_hash char(64) NOT NULL,
-  status text NOT NULL CHECK (status IN ('collecting', 'queued', 'queue_failed', 'recognizing', 'vision_ready', 'vision_failed', 'cancelled', 'expired')),
+  status text NOT NULL CHECK (status IN ('collecting', 'queued', 'queue_failed', 'measuring', 'measurement_failed', 'recognizing', 'vision_ready', 'vision_failed', 'cancelled', 'expired')),
   error_code text,
   worker_received_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -38,4 +38,13 @@ CREATE TABLE IF NOT EXISTS task_upload_slots (
   error_code text,
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (task_id, role)
+);
+
+CREATE TABLE IF NOT EXISTS image_measurements (
+  task_id uuid PRIMARY KEY REFERENCES color_tasks(id) ON DELETE CASCADE,
+  schema_version integer NOT NULL CHECK (schema_version > 0),
+  reference_result jsonb NOT NULL,
+  target_result jsonb NOT NULL,
+  comparison_result jsonb NOT NULL,
+  completed_at timestamptz NOT NULL DEFAULT now()
 );

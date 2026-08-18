@@ -1,13 +1,16 @@
 import json
+import hashlib
 import logging
 import os
 import signal
 from dataclasses import dataclass
 
 import redis
+from PIL import UnidentifiedImageError
 
 from .config import Settings
-from .images import RawDecodeError, create_vision_preview
+from .images import ImageColorProfileError, RawDecodeError, create_vision_preview, decode_measurement_image
+from .measurements import SCHEMA_VERSION, compare_measurements, measure_image, validate_comparison, validate_measurement
 from .qwen import QwenVisionClient, VisionProviderError
 from .repository import TaskRepository
 from .storage import AssetStorage
@@ -18,15 +21,31 @@ QUEUE_NAME = "reftone:analysis:pending"
 
 
 @dataclass(frozen=True)
-class AnalysisJob:
+class WorkerJob:
+    kind: str
     task_id: str
+    role: str | None = None
+    object_key: str | None = None
 
     @classmethod
-    def from_json(cls, payload: str) -> "AnalysisJob":
+    def from_json(cls, payload: str) -> "WorkerJob":
         value = json.loads(payload)
-        if value.get("version") != 1 or not isinstance(value.get("taskId"), str):
-            raise ValueError("unsupported analysis job")
-        return cls(task_id=value["taskId"])
+        if not isinstance(value.get("taskId"), str):
+            raise ValueError("unsupported worker job")
+        if value.get("version") == 1:
+            return cls(kind="analyze", task_id=value["taskId"])
+        if value.get("version") != 2 or value.get("kind") not in ("analyze", "prepare_preview"):
+            raise ValueError("unsupported worker job")
+        if value["kind"] == "prepare_preview":
+            if value.get("role") not in ("reference", "target") or not isinstance(value.get("objectKey"), str):
+                raise ValueError("invalid preview job")
+            return cls(kind=value["kind"], task_id=value["taskId"], role=value["role"], object_key=value["objectKey"])
+        return cls(kind="analyze", task_id=value["taskId"])
+
+
+# Keep the original import name available for existing callers while job envelopes
+# expand beyond full analysis.
+AnalysisJob = WorkerJob
 
 
 class Worker:
@@ -45,22 +64,124 @@ class Worker:
     def stop(self, *_args: object) -> None:
         self.running = False
 
-    def process(self, job: AnalysisJob) -> None:
+    def prepare_preview(self, job: WorkerJob) -> None:
+        if job.role not in ("reference", "target") or job.object_key is None:
+            return
+        if not self.repository.preview_asset_is_current(job.task_id, job.role, job.object_key):
+            logger.info("Skipped stale RAW preview job for task %s", job.task_id)
+            return
+        try:
+            source = self.storage.read(job.object_key)
+            preview = create_vision_preview(
+                source,
+                self.settings.vision_max_edge,
+                self.settings.vision_jpeg_quality,
+                True,
+            )
+        except RawDecodeError:
+            self.repository.fail_preview(job.task_id, job.role, job.object_key, "raw_decode_failed")
+            logger.warning("Task %s could not decode its %s RAW preview", job.task_id, job.role)
+            return
+        except Exception:
+            self.repository.fail_preview(job.task_id, job.role, job.object_key, "vision_preprocessing_failed")
+            logger.exception("Task %s failed to prepare its %s RAW preview", job.task_id, job.role)
+            return
+
+        digest = hashlib.sha256(job.object_key.encode("utf-8")).hexdigest()[:16]
+        preview_key = f"tasks/{job.task_id}/previews/{job.role}-{digest}.jpg"
+        try:
+            self.storage.write(preview_key, preview, "image/jpeg")
+            if not self.repository.set_preview(job.task_id, job.role, job.object_key, preview_key):
+                self.storage.delete(preview_key)
+                logger.info("Discarded stale RAW preview for task %s", job.task_id)
+                return
+            logger.info("Prepared RAW preview for task %s", job.task_id)
+        except Exception:
+            try:
+                self.storage.delete(preview_key)
+            except Exception:
+                logger.warning("Could not clean failed RAW preview %s", preview_key)
+            self.repository.fail_preview(job.task_id, job.role, job.object_key, "vision_preview_storage_failed")
+            logger.exception("Task %s could not store its RAW preview", job.task_id)
+
+    def process_analysis(self, job: WorkerJob) -> None:
         assets = self.repository.claim(job.task_id)
         if assets is None:
             logger.warning("Skipped unknown, expired, inactive, or incomplete task %s", job.task_id)
             return
-        if not self.settings.dashscope_api_key:
-            self.repository.fail(job.task_id, "dashscope_api_key_missing")
-            logger.warning("Task %s cannot run because DASHSCOPE_API_KEY is missing", job.task_id)
-            return
-
         try:
             reference_source = self.storage.read(assets.reference_key)
             target_source = self.storage.read(assets.target_key)
         except Exception:
-            self.repository.fail(job.task_id, "vision_asset_unavailable")
+            self.repository.fail_measurement(job.task_id, "measurement_asset_unavailable")
             logger.exception("Task %s could not read its image assets", job.task_id)
+            return
+
+        try:
+            reference_decoded = decode_measurement_image(reference_source, assets.reference_is_raw)
+        except RawDecodeError:
+            self.repository.fail_measurement(job.task_id, "measurement_decode_failed", "reference")
+            logger.warning("Task %s could not decode its reference image for measurement", job.task_id)
+            return
+        except ImageColorProfileError:
+            self.repository.fail_measurement(job.task_id, "measurement_color_profile_failed", "reference")
+            logger.warning("Task %s could not convert the reference color profile", job.task_id)
+            return
+        except (UnidentifiedImageError, OSError):
+            self.repository.fail_measurement(job.task_id, "measurement_decode_failed", "reference")
+            logger.warning("Task %s could not decode its reference image for measurement", job.task_id)
+            return
+
+        try:
+            target_decoded = decode_measurement_image(target_source, assets.target_is_raw)
+        except RawDecodeError:
+            self.repository.fail_measurement(job.task_id, "measurement_decode_failed", "target")
+            logger.warning("Task %s could not decode its target image for measurement", job.task_id)
+            return
+        except ImageColorProfileError:
+            self.repository.fail_measurement(job.task_id, "measurement_color_profile_failed", "target")
+            logger.warning("Task %s could not convert the target color profile", job.task_id)
+            return
+        except (UnidentifiedImageError, OSError):
+            self.repository.fail_measurement(job.task_id, "measurement_decode_failed", "target")
+            logger.warning("Task %s could not decode its target image for measurement", job.task_id)
+            return
+
+        try:
+            reference_measurement = measure_image(
+                reference_decoded.image,
+                reference_decoded.source_kind,
+                reference_decoded.raw_clues,
+                (reference_decoded.source_width, reference_decoded.source_height),
+            )
+            target_measurement = measure_image(
+                target_decoded.image,
+                target_decoded.source_kind,
+                target_decoded.raw_clues,
+                (target_decoded.source_width, target_decoded.source_height),
+            )
+            comparison = compare_measurements(reference_measurement, target_measurement)
+            validate_measurement(reference_measurement)
+            validate_measurement(target_measurement)
+            validate_comparison(comparison)
+        except Exception:
+            self.repository.fail_measurement(job.task_id, "measurement_calculation_failed")
+            logger.exception("Task %s failed deterministic image measurement", job.task_id)
+            return
+
+        if not self.repository.save_measurements(
+            job.task_id,
+            SCHEMA_VERSION,
+            reference_measurement,
+            target_measurement,
+            comparison,
+        ):
+            logger.info("Discarded measurements for cancelled task %s", job.task_id)
+            return
+
+        if not self.settings.dashscope_api_key:
+            self.repository.fail(job.task_id, "dashscope_api_key_missing")
+            logger.warning("Task %s cannot run because DASHSCOPE_API_KEY is missing", job.task_id)
             return
 
         try:
@@ -126,6 +247,12 @@ class Worker:
         else:
             logger.info("Discarded Qwen result for cancelled task %s", job.task_id)
 
+    def process(self, job: WorkerJob) -> None:
+        if job.kind == "prepare_preview":
+            self.prepare_preview(job)
+        else:
+            self.process_analysis(job)
+
     def run(self) -> None:
         logger.info("Worker listening on %s with model %s", QUEUE_NAME, self.settings.dashscope_model)
         while self.running:
@@ -133,9 +260,10 @@ class Worker:
             if item is None:
                 continue
             try:
-                self.process(AnalysisJob.from_json(item[1]))
+                job = WorkerJob.from_json(item[1])
+                self.process(job)
             except Exception:
-                logger.exception("Failed to process analysis job envelope")
+                logger.exception("Failed to process worker job envelope")
 
 
 def main() -> None:

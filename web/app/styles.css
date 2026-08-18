@@ -37,6 +37,9 @@ h1 { max-width:760px; margin:10px 0 18px; font-size:clamp(36px, 6vw, 64px); line
 .file-input { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); clip-path:inset(50%); white-space:nowrap; }
 .primary { width:100%; margin-top:18px; padding:14px 20px; border:0; border-radius:11px; background:var(--blue); color:#fff; font:700 15px inherit; cursor:pointer; }
 .primary:disabled { opacity:.6; cursor:wait; }
+.analysis-confirmation { margin-top:18px; padding:18px; border:1px solid #cbd8eb; border-radius:12px; background:#f5f8fd; }
+.analysis-confirmation .primary { margin-top:0; }
+.analysis-confirmation p { margin:10px 0 0; color:var(--muted); text-align:center; font-size:13px; line-height:1.5; }
 .secondary { margin-top:18px; padding:11px 16px; border:1px solid #b8c4d1; border-radius:10px; background:#fff; color:var(--ink); font:700 14px inherit; cursor:pointer; }
 .secondary:hover { border-color:var(--blue); color:var(--blue); }
 .notice { margin:18px 0 0; padding:16px 18px; border-radius:12px; display:flex; flex-wrap:wrap; gap:8px 16px; line-height:1.5; }

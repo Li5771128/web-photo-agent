@@ -1,6 +1,6 @@
 # 调色分析 MVP 交接
 
-更新时间：2026-08-18
+更新时间：2026-08-19
 
 ## 新对话起点
 
@@ -12,7 +12,7 @@
 4. `ARCHITECTURE.md`
 5. `README.md`
 
-当前推荐继续 issue 02：实现本地确定性图像测量，然后把测量结果与已有千问语义识图结果组合成受校验的 Lightroom 参数计划。
+当前推荐继续 issue 02：把已完成的确定性测量与千问语义识图结果组合成规划上下文，再生成并校验 Lightroom 参数计划。
 
 ## 已实现
 
@@ -35,6 +35,13 @@
   - AI 阶段可单独换 A 或 B，新任务复用另一张图片；重新开始会取消旧任务。
   - 上传尝试带服务端槽位和单调版本，快速换图的旧请求不能覆盖新图片。
   - Worker 对预览和模型结果执行取消状态条件写入，迟到结果不会恢复旧任务。
+  - A/B 上传完成后等待用户点击“确认分析”，不再自动调用图片内容理解；RAW 在确认前先生成安全预览。
+- 确定性图像测量：
+  - Worker 按 `queued → measuring → recognizing` 顺序执行，测量先于千问且独立保存。
+  - 普通图片纠正 EXIF 方向并转换为 sRGB；RAW 使用固定 rawpy 后处理参数，不持久化可识别 EXIF。
+  - 结果包含亮度分布、明暗区域、裁切占比、对比度、HSL 饱和度、12 区间色相、主色、冷暖/绿洋红倾向、边缘活动度和 RAW 动态范围线索。
+  - A/B comparison 使用 `reference - target` 差值与 `increase/decrease/similar` 方向。
+  - `image_measurements` 以任务为单位原子保存 reference、target、comparison 三组 Schema v1 JSON，并由任务 API 返回；当前 UI 不展示具体数值。
 
 ## API Key 配置
 
@@ -62,21 +69,23 @@ docker compose up --build -d
 
 - `docker compose config` 通过。
 - Next.js 生产构建与 TypeScript 检查通过。
-- Worker 离线单元测试 12 项通过：预览尺寸、方向、EXIF、透明图片、RAW 预览/错误、Qwen 请求格式、两张 Data URI、`store: false`、JSON 代码块、错误响应和取消安全写入。
-- 独立上传冒烟脚本通过：A/B 分别确认后自动入队，AI 阶段换 A 会取消旧任务、复用 B、只重传 A 并重新入队。
-- 数据库迁移服务退出码为 0，`vision_analyses` 表存在。
+- Worker 离线单元测试 24 项通过，覆盖预览、RAW、千问请求、测量数值与方向、结果校验、持久化和取消安全。
+- 独立上传/手动确认/单侧替换冒烟脚本通过；用户也已确认页面按钮正常出现。
+- 无千问测量冒烟脚本通过：任务 API 返回完整 Schema v1 reference、target、comparison。
+- Web 生产构建和 TypeScript 检查通过；Worker 镜像构建通过。
+- 数据库迁移服务退出码为 0，`vision_analyses` 与 `image_measurements` 表存在。
 - 无 Key 的实际上传流程返回 `vision_failed / dashscope_api_key_missing`，不会发起千问请求。
 - 尚未使用真实 Key 做付费 API 冒烟测试。
 
 ## 未实现
 
-- 确定性图像测量：亮度分布、直方图、主色、HSL、对比度、饱和度、色温、裁切风险和 RAW 动态范围线索。
 - 将确定性测量与千问语义结果合并为规划上下文。
 - 结构化 Lightroom 参数草案、数值范围、安全校验、参数卡和匹配可行度。
 - XMP 导出。
 - 同会话调整后 JPG 微调轮次。
 - 到期清理 Worker。当前 `expires_at` 不会自动删除 MinIO 或数据库数据。
 - Issue 05 尚余真实大文件限速验证和八种真实 RAW 样本逐一验证；功能代码、构建和无敏感数据冒烟链路已完成。
+- 确定性测量尚未使用八种真实相机 RAW 样本做跨格式准确度验证；当前 RAW 测试使用固定 mock 数据验证解码参数与非识别性线索。
 
 ## 关键边界
 

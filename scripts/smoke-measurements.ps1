@@ -26,44 +26,31 @@ function Start-Upload([string]$TaskId, [string]$Role) {
     "-b", $cookieJar, "-X", "PUT", "-F", "file=@$imagePath;type=image/png",
     "$BaseUrl/api/tasks/$TaskId/assets/$Role/attempts/$($attempt.attemptId)"
   )
-  if (-not $upload.status) { throw "$Role upload did not return a task status" }
-  return $upload
+  if ($upload.status -ne "collecting") { throw "$Role upload must keep the task collecting" }
 }
 
 try {
   if ($workerWasRunning) { docker stop $workerName | Out-Null }
   $task = Invoke-JsonCurl @("-c", $cookieJar, "-X", "POST", "$BaseUrl/api/tasks")
   $activeTaskId = $task.id
-  if ($task.status -ne "collecting") { throw "New task must be collecting" }
+  Start-Upload $task.id "reference"
+  Start-Upload $task.id "target"
 
-  $reference = Start-Upload $task.id "reference"
-  if ($reference.status -ne "collecting") { throw "First upload must keep the task collecting" }
-  $target = Start-Upload $task.id "target"
-  if ($target.status -ne "collecting") { throw "Second upload must wait for analysis confirmation" }
-
-  $snapshot = Invoke-JsonCurl @("-b", $cookieJar, "$BaseUrl/api/tasks/$($task.id)")
-  if ($snapshot.status -ne "collecting" -or $snapshot.assets.reference.status -ne "confirmed" -or $snapshot.assets.target.status -ne "confirmed") {
-    throw "A/B assets were not independently confirmed"
-  }
   $confirmation = Invoke-JsonCurl @("-b", $cookieJar, "-X", "POST", "$BaseUrl/api/tasks/$($task.id)/analysis")
   if ($confirmation.status -ne "queued") { throw "Analysis confirmation did not queue the task" }
 
-  $replacement = Invoke-JsonCurl @(
-    "-b", $cookieJar, "-H", "Content-Type: application/json", "-d", '{\"replaceRole\":\"reference\"}',
-    "$BaseUrl/api/tasks/$($task.id)/replacement"
-  )
-  if (-not $replacement.id) { throw "Replacement task was not created: $($replacement | ConvertTo-Json -Compress)" }
-  $activeTaskId = $replacement.id
-  $replacementSnapshot = Invoke-JsonCurl @("-b", $cookieJar, "$BaseUrl/api/tasks/$($replacement.id)")
-  if ($replacementSnapshot.status -ne "collecting" -or $replacementSnapshot.assets.target.status -ne "confirmed" -or $replacementSnapshot.assets.reference.status -ne "empty") {
-    throw "Replacement task did not retain only target B"
-  }
+  docker-compose run --rm -T --no-deps -e DASHSCOPE_API_KEY= -e "SMOKE_TASK_ID=$($task.id)" worker `
+    python -c "import os; from app.main import Worker, WorkerJob; Worker().process_analysis(WorkerJob(kind='analyze', task_id=os.environ['SMOKE_TASK_ID']))"
+  if ($LASTEXITCODE -ne 0) { throw "One-shot measurement worker failed" }
 
-  $replacementUpload = Start-Upload $replacement.id "reference"
-  if ($replacementUpload.status -ne "collecting") { throw "Replacement upload must wait for confirmation" }
-  $replacementConfirmation = Invoke-JsonCurl @("-b", $cookieJar, "-X", "POST", "$BaseUrl/api/tasks/$($replacement.id)/analysis")
-  if ($replacementConfirmation.status -ne "queued") { throw "Replacement confirmation did not queue the task" }
-  Write-Output "Independent upload and single-side replacement smoke test passed."
+  $snapshot = Invoke-JsonCurl @("-b", $cookieJar, "$BaseUrl/api/tasks/$($task.id)")
+  if ($snapshot.status -ne "vision_failed" -or $snapshot.errorCode -ne "dashscope_api_key_missing") {
+    throw "Measurement smoke task did not stop safely before Qwen"
+  }
+  if ($snapshot.measurements.schemaVersion -ne 1 -or -not $snapshot.measurements.reference -or -not $snapshot.measurements.target -or -not $snapshot.measurements.comparison) {
+    throw "Task API did not return complete deterministic measurements"
+  }
+  Write-Output "Deterministic measurement smoke test passed without calling Qwen."
 } finally {
   if ($activeTaskId) {
     try { Invoke-JsonCurl @("-b", $cookieJar, "-X", "DELETE", "$BaseUrl/api/tasks/$activeTaskId") | Out-Null } catch { }

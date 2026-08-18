@@ -59,7 +59,7 @@ services:
     command:
       - sh
       - -c
-      - psql "$${DATABASE_URL}" -v ON_ERROR_STOP=1 -f /database/init.sql && psql "$${DATABASE_URL}" -v ON_ERROR_STOP=1 -f /database/migrations/002-qwen-vision.sql && psql "$${DATABASE_URL}" -v ON_ERROR_STOP=1 -f /database/migrations/003-independent-uploads-and-raw.sql
+      - psql "$${DATABASE_URL}" -v ON_ERROR_STOP=1 -f /database/init.sql && psql "$${DATABASE_URL}" -v ON_ERROR_STOP=1 -f /database/migrations/002-qwen-vision.sql && psql "$${DATABASE_URL}" -v ON_ERROR_STOP=1 -f /database/migrations/003-independent-uploads-and-raw.sql && psql "$${DATABASE_URL}" -v ON_ERROR_STOP=1 -f /database/migrations/004-deterministic-measurements.sql
     volumes:
       - ./database:/database:ro
     depends_on:

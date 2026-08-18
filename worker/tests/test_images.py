@@ -1,10 +1,12 @@
 import unittest
 from io import BytesIO
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import numpy as np
+import rawpy
 from PIL import Image
 
-from app.images import RawDecodeError, create_vision_preview
+from app.images import RawDecodeError, create_vision_preview, decode_measurement_image
 
 
 class VisionPreviewTest(unittest.TestCase):
@@ -47,6 +49,40 @@ class VisionPreviewTest(unittest.TestCase):
     def test_invalid_raw_has_a_stable_error(self) -> None:
         with self.assertRaises(RawDecodeError):
             create_vision_preview(b"not a raw file", max_edge=1024, quality=80, is_raw=True)
+
+    def test_measurement_decode_corrects_orientation_and_limits_sample_size(self) -> None:
+        source = BytesIO()
+        image = Image.new("RGB", (1200, 600), "#7f7f7f")
+        exif = Image.Exif()
+        exif[274] = 6
+        image.save(source, format="JPEG", exif=exif)
+
+        decoded = decode_measurement_image(source.getvalue(), is_raw=False, max_edge=1024)
+
+        self.assertEqual(decoded.source_kind, "standard")
+        self.assertEqual(decoded.image.size, (512, 1024))
+        self.assertIsNone(decoded.raw_clues)
+
+    @patch("app.images.rawpy.imread")
+    def test_raw_measurement_decode_uses_fixed_rendering_and_non_identifying_clues(self, imread) -> None:
+        raw = MagicMock()
+        imread.return_value.__enter__.return_value = raw
+        raw.postprocess.return_value = np.full((2, 3, 3), 128, dtype=np.uint8)
+        raw.raw_image_visible = np.zeros((2, 3), dtype=np.uint16)
+        raw.black_level_per_channel = [512, 520, 512, 520]
+        raw.white_level = 16383
+
+        decoded = decode_measurement_image(b"raw fixture", is_raw=True, max_edge=1024)
+
+        self.assertEqual(decoded.source_kind, "raw")
+        self.assertEqual(decoded.image.size, (3, 2))
+        self.assertEqual(decoded.raw_clues, {"bit_depth": 14, "black_level_min": 512, "black_level_max": 520, "white_level": 16383})
+        raw.postprocess.assert_called_once_with(
+            use_camera_wb=True,
+            no_auto_bright=True,
+            output_bps=8,
+            output_color=rawpy.ColorSpace.sRGB,
+        )
 
 
 if __name__ == "__main__":

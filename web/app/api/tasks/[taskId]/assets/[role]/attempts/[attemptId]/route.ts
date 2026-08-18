@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getConfig } from "../../../../../../../../lib/config";
 import { getDatabase, transaction } from "../../../../../../../../lib/database";
-import { enqueueAnalysis } from "../../../../../../../../lib/queue";
+import { enqueuePreview } from "../../../../../../../../lib/queue";
 import { getOrCreateSession } from "../../../../../../../../lib/session";
 import { deleteObject, storeObject } from "../../../../../../../../lib/storage";
 import { UploadValidationError, validateUpload, type AssetRole } from "../../../../../../../../lib/uploads";
@@ -75,20 +75,7 @@ export async function PUT(
          WHERE task_id = $1 AND role = $2 AND current_attempt_id = $3`,
         [taskId, role, attemptId],
       );
-      const confirmed = await client.query(
-        "SELECT count(*)::int AS count FROM task_upload_slots WHERE task_id = $1 AND status = 'confirmed'",
-        [taskId],
-      );
-      let shouldEnqueue = false;
-      if (confirmed.rows[0].count === 2) {
-        const queued = await client.query(
-          "UPDATE color_tasks SET status = 'queued', error_code = NULL, updated_at = now() WHERE id = $1 AND status = 'collecting' RETURNING id",
-          [taskId],
-        );
-        shouldEnqueue = queued.rowCount === 1;
-      }
       return {
-        shouldEnqueue,
         previousKeys: previous.rowCount === 1
           ? [previous.rows[0].object_key, previous.rows[0].preview_object_key].filter(Boolean) as string[]
           : [],
@@ -96,19 +83,24 @@ export async function PUT(
     });
 
     await Promise.allSettled(result.previousKeys.filter((key) => key !== objectKey).map(deleteObject));
-    let status = result.shouldEnqueue ? "queued" : "collecting";
-    if (result.shouldEnqueue) {
-      try { await enqueueAnalysis(taskId); }
+    if (upload.isRaw) {
+      try { await enqueuePreview(taskId, role, objectKey); }
       catch (error) {
-        status = "queue_failed";
         await getDatabase().query(
-          "UPDATE color_tasks SET status = 'queue_failed', error_code = 'queue_unavailable', updated_at = now() WHERE id = $1 AND status = 'queued'",
-          [taskId],
+          `UPDATE task_upload_slots s SET status = 'failed', error_code = 'preview_queue_unavailable', updated_at = now()
+           FROM task_assets a, color_tasks t
+           WHERE s.task_id = $1 AND s.role = $2 AND a.task_id = s.task_id AND a.role = s.role
+             AND a.object_key = $3 AND t.id = s.task_id AND t.status = 'collecting'`,
+          [taskId, role, objectKey],
         );
-        console.error("analysis enqueue failed", { taskId, error });
+        console.error("preview enqueue failed", { taskId, role, error });
+        return NextResponse.json(
+          { error: { code: "preview_queue_unavailable", message: "RAW 预览暂时无法生成，请更换图片后重试。" } },
+          { status: 503 },
+        );
       }
     }
-    return NextResponse.json({ role, status, isRaw: upload.isRaw, previewReady: false });
+    return NextResponse.json({ role, status: "collecting", isRaw: upload.isRaw, previewReady: false });
   } catch (error) {
     if (objectKey) await deleteObject(objectKey).catch(() => undefined);
     if (error instanceof UploadValidationError) {

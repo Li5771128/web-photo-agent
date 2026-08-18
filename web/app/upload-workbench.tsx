@@ -3,7 +3,7 @@
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 
 type Role = "reference" | "target";
-type TaskStatus = "collecting" | "queued" | "queue_failed" | "recognizing" | "vision_ready" | "vision_failed" | "cancelled" | "expired";
+type TaskStatus = "collecting" | "queued" | "queue_failed" | "measuring" | "measurement_failed" | "recognizing" | "vision_ready" | "vision_failed" | "cancelled" | "expired";
 type AssetState = {
   status: "empty" | "uploading" | "confirmed" | "failed";
   errorCode?: string | null;
@@ -20,6 +20,7 @@ type TaskState = {
   errorCode?: string | null;
   visionModel?: string | null;
   visionResult?: VisionResult | null;
+  measurements?: unknown;
   assets: Record<Role, AssetState>;
 };
 type UploadPhase = "idle" | "uploading" | "confirming" | "success" | "error";
@@ -63,7 +64,12 @@ const errorMessages: Record<string, string> = {
   vision_asset_unavailable: "识图所需的临时图片不可用，请更换图片。",
   vision_preprocessing_failed: "图片预览处理失败，请更换图片后重试。",
   vision_preview_storage_failed: "图片预览暂时无法保存，请稍后重试。",
+  preview_queue_unavailable: "RAW 预览暂时无法生成，请更换图片后重试。",
   raw_decode_failed: "RAW 文件无法解码，请更换目标图 B。",
+  measurement_asset_unavailable: "测量所需的临时图片不可用，请更换图片。",
+  measurement_decode_failed: "图片无法完成本地数值测量，请更换图片。",
+  measurement_color_profile_failed: "图片的嵌入色彩配置无法可靠转换，请更换图片。",
+  measurement_calculation_failed: "本地图像测量失败，请稍后重试。",
   vision_provider_failed: "千问服务调用失败，请检查 API Key、模型权限或稍后重试。",
   vision_response_invalid: "千问返回的识图结果格式无效，请重新尝试。",
   queue_unavailable: "任务队列暂时不可用，请稍后重试。",
@@ -78,8 +84,15 @@ async function responseBody<T>(response: Response): Promise<T & ApiError> {
 }
 
 function statusCopy(task: TaskState): { title: string; detail: string; tone: "success" | "error" } {
-  if (task.status === "collecting") return { title: "等待图片上传", detail: "A、B 均确认后将自动开始图片内容理解。", tone: "success" };
+  if (task.status === "collecting") {
+    const bothConfirmed = task.assets.reference?.status === "confirmed" && task.assets.target?.status === "confirmed";
+    const rawPreviewPending = Boolean(task.assets.target?.isRaw && !task.assets.target?.previewReady);
+    if (bothConfirmed && rawPreviewPending) return { title: "RAW 预览生成中", detail: "预览完成后即可确认分析。", tone: "success" };
+    if (bothConfirmed) return { title: "图片已准备好", detail: "请核对图片后点击“确认分析”。", tone: "success" };
+    return { title: "等待图片上传", detail: "A、B 均上传成功后可以确认分析。", tone: "success" };
+  }
   if (task.status === "queued") return { title: "任务已进入队列", detail: "正在等待 Python Worker…", tone: "success" };
+  if (task.status === "measuring") return { title: "正在进行图像测量", detail: "本地计算亮度、色彩、对比度与 A/B 差异…", tone: "success" };
   if (task.status === "recognizing") return { title: "千问正在理解图片内容", detail: "正在分析场景、主体、人物与光线条件…", tone: "success" };
   if (task.status === "vision_ready") return { title: "图片内容理解完成", detail: `模型 ${task.visionModel ?? "qwen3.7-max"}`, tone: "success" };
   const detail = task.errorCode ? errorMessages[task.errorCode] ?? "任务失败，请更换图片或重试。" : "任务未完成，请重试。";
@@ -152,6 +165,7 @@ export function UploadWorkbench() {
   const [task, setTaskState] = useState<TaskState | null>(null);
   const [uploads, setUploads] = useState<Record<Role, UploadState>>({ reference: emptyUpload(), target: emptyUpload() });
   const [message, setMessage] = useState<string | null>(null);
+  const [confirmingAnalysis, setConfirmingAnalysis] = useState(false);
   const taskRef = useRef<TaskState | null>(null);
   const taskCreationRef = useRef<Promise<TaskState> | null>(null);
   const xhrs = useRef<Record<Role, XMLHttpRequest | null>>({ reference: null, target: null });
@@ -188,7 +202,11 @@ export function UploadWorkbench() {
   }, []);
 
   useEffect(() => {
-    if (!task || !["queued", "recognizing"].includes(task.status)) return;
+    const rawPreviewPending = task?.status === "collecting"
+      && task.assets.target?.status === "confirmed"
+      && task.assets.target?.isRaw
+      && !task.assets.target?.previewReady;
+    if (!task || (!["queued", "measuring", "recognizing"].includes(task.status) && !rawPreviewPending)) return;
     const timer = window.setInterval(async () => {
       const response = await fetch(`/api/tasks/${task.id}`, { cache: "no-store" });
       if (!response.ok) return;
@@ -203,7 +221,7 @@ export function UploadWorkbench() {
       }
     }, 3000);
     return () => window.clearInterval(timer);
-  }, [task?.id, task?.status]);
+  }, [task?.id, task?.status, task?.assets.target?.status, task?.assets.target?.isRaw, task?.assets.target?.previewReady]);
 
   async function ensureTask(): Promise<TaskState> {
     if (taskRef.current?.status === "collecting") return taskRef.current;
@@ -323,15 +341,42 @@ export function UploadWorkbench() {
     xhrs.current.reference?.abort(); xhrs.current.target?.abort();
     releasePreview(uploads.reference); releasePreview(uploads.target);
     const current = taskRef.current;
-    setUploads({ reference: emptyUpload(), target: emptyUpload() }); setTask(null); setMessage(null);
+    setUploads({ reference: emptyUpload(), target: emptyUpload() }); setTask(null); setMessage(null); setConfirmingAnalysis(false);
     if (current) await fetch(`/api/tasks/${current.id}`, { method: "DELETE" }).catch(() => undefined);
   }
 
+  async function confirmAnalysis() {
+    const current = taskRef.current;
+    if (!current || confirmingAnalysis) return;
+    setConfirmingAnalysis(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/tasks/${current.id}/analysis`, { method: "POST" });
+      const body = await responseBody<{ id: string; status: TaskStatus }>(response);
+      if (!response.ok) throw new Error(body.error?.message ?? "暂时无法开始分析，请稍后重试。");
+      const active = taskRef.current;
+      if (active?.id === current.id) setTask({ ...active, status: body.status, errorCode: null });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "暂时无法开始分析，请稍后重试。");
+    } finally {
+      setConfirmingAnalysis(false);
+    }
+  }
+
   const copy = task ? statusCopy(task) : null;
+  const bothConfirmed = task?.assets.reference?.status === "confirmed" && task.assets.target?.status === "confirmed";
+  const rawPreviewPending = Boolean(task?.assets.target?.isRaw && !task.assets.target?.previewReady);
+  const showAnalysisConfirmation = Boolean(task && bothConfirmed && ["collecting", "queue_failed"].includes(task.status));
   return <section className="workbench" aria-labelledby="upload-title">
     <div className="section-heading"><div><p className="step">步骤 1 / 3</p><h2 id="upload-title">上传图片对</h2></div><p>A/B 选择后独立自动上传。普通图片最大 30 MB；目标图 B 的 RAW 最大 40 MB。</p></div>
     <p className="privacy-note">RAW 需上传后生成预览；上传期间暂不显示缩略图。系统只将去除 EXIF、长边不超过 1024px 的 A/B 预览发送给阿里云百炼，不发送原始分辨率文件。</p>
     <div className="upload-grid"><UploadCard role="reference" state={uploads.reference} onSelect={(event) => void selectFile("reference", event)} /><UploadCard role="target" state={uploads.target} onSelect={(event) => void selectFile("target", event)} /></div>
+    {showAnalysisConfirmation && <div className="analysis-confirmation">
+      <button className="primary" type="button" disabled={confirmingAnalysis || rawPreviewPending} onClick={() => void confirmAnalysis()}>
+        {confirmingAnalysis ? "正在提交…" : rawPreviewPending ? "RAW 预览生成中…" : "确认分析"}
+      </button>
+      <p>{rawPreviewPending ? "请等待 RAW 预览生成并核对图片。" : "点击后才会开始图片内容理解。"}</p>
+    </div>}
     {task && <button className="secondary" type="button" onClick={() => void restart()}>重新开始</button>}
     {message && <p className="notice error" role="alert">{message}</p>}
     {task && copy && <div className={`notice ${copy.tone}`} aria-live="polite"><strong>{copy.title}</strong><span>任务 {task.id.slice(0, 8)} · 状态 {task.status}</span><span>{copy.detail}</span></div>}
