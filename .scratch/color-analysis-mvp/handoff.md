@@ -83,6 +83,7 @@ docker compose up --build -d
 - 数据库迁移服务退出码为 0，`vision_analyses`、`image_measurements` 与 `lightroom_plans` 表存在。
 - 无 Key 的实际上传流程返回 `vision_failed / dashscope_api_key_missing`，不会发起千问请求。
 - 已使用 `test1.jpg` / `test2.jpg` 完成真实 Key 联调：视觉识别成功；关闭规划深度思考后约 25 秒返回，最终任务为 `ready`，保存 12 项安全参数并记录 1 项风险收紧。
+- 结果页已改为浅色结论卡与原型式可行性进度条；正文按差异、计划、风险、确定性读数排序，并提供响应式章节导航。
 
 ## 未实现
 

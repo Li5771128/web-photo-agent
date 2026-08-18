@@ -1,4 +1,5 @@
-import { Comparison, comparisonEntries } from "../lib/analysis-results";
+import { useEffect, useState } from "react";
+import { comparisonEntries, feasibilityPresentation, resultSections, type Comparison } from "../lib/analysis-results";
 
 type ImageSummary = {
   scene_type: string;
@@ -129,7 +130,7 @@ function RawClues({ value }: { value: Record<string, unknown> | null }) {
 }
 
 function MeasurementReport({ measurements }: { measurements: Measurements }) {
-  return <section className="result-section" aria-labelledby="measurement-title">
+  return <section id="result-measurements" className="result-section result-anchor-target" aria-labelledby="measurement-title">
     <div className="result-section-heading"><div><p className="step">DETERMINISTIC READINGS</p><h3 id="measurement-title">确定性图像读数</h3></div><span>Schema v{measurements.schemaVersion}</span></div>
     <div className="histogram-grid"><HistogramChart label="参考图 A" histogram={measurements.reference.rgb_histogram} /><HistogramChart label="目标图 B" histogram={measurements.target.rgb_histogram} /></div>
     <div className="measurement-table-wrap"><table className="measurement-table"><thead><tr><th>测量项</th><th>参考图 A</th><th>目标图 B</th></tr></thead><tbody>
@@ -150,14 +151,14 @@ const comparisonLabels: Record<string, string> = {
 
 function ComparisonReport({ comparison }: { comparison: Comparison }) {
   const direction = { increase: "提高", decrease: "降低", similar: "接近" } as const;
-  return <section className="result-section" aria-labelledby="comparison-title"><div className="result-section-heading"><div><p className="step">REFERENCE → TARGET</p><h3 id="comparison-title">A/B 差异方向</h3></div></div>
+  return <section id="result-comparison" className="result-section result-anchor-target" aria-labelledby="comparison-title"><div className="result-section-heading"><div><p className="step">REFERENCE → TARGET</p><h3 id="comparison-title">A/B 差异方向</h3></div></div>
     <div className="comparison-grid">{comparisonEntries(comparison).map(([key, value]) => <article key={key}><span>{comparisonLabels[key] ?? key}</span><strong className={value.direction}>{direction[value.direction]}</strong><small>{value.delta > 0 ? "+" : ""}{value.delta.toFixed(3)}</small></article>)}</div>
   </section>;
 }
 
 const groupLabels = { basic: "基础校正", style: "风格塑造", fine_tune: "可选微调" };
 function PlanReport({ plan }: { plan: LightroomPlan }) {
-  return <section className="result-section" aria-labelledby="plan-title"><div className="result-section-heading"><div><p className="step">SAFE LIGHTROOM PLAN</p><h3 id="plan-title">Lightroom 参数计划</h3></div><span>{plan.parameters.length} 项调整</span></div>
+  return <section id="result-plan" className="result-section result-anchor-target" aria-labelledby="plan-title"><div className="result-section-heading"><div><p className="step">SAFE LIGHTROOM PLAN</p><h3 id="plan-title">Lightroom 参数计划</h3></div><span>{plan.parameters.length} 项调整</span></div>
     {(["basic", "style", "fine_tune"] as const).map((group) => {
       const parameters = plan.parameters.filter((parameter) => parameter.group === group);
       if (!parameters.length) return null;
@@ -171,20 +172,60 @@ function PlanReport({ plan }: { plan: LightroomPlan }) {
   </section>;
 }
 
+function ResultNavigation() {
+  const [activeId, setActiveId] = useState<string>(resultSections[0].id);
+
+  useEffect(() => {
+    const targets = resultSections
+      .map((section) => document.getElementById(section.id))
+      .filter((target): target is HTMLElement => Boolean(target));
+    if (!targets.length || !("IntersectionObserver" in window)) return;
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((left, right) => left.boundingClientRect.top - right.boundingClientRect.top);
+      if (visible[0]) setActiveId(visible[0].target.id);
+    }, { rootMargin: "-112px 0px -62% 0px", threshold: [0, 0.01, 1] });
+    targets.forEach((target) => observer.observe(target));
+    return () => observer.disconnect();
+  }, []);
+
+  function navigate(event: React.MouseEvent<HTMLAnchorElement>, id: string) {
+    const target = document.getElementById(id);
+    if (!target) return;
+    event.preventDefault();
+    setActiveId(id);
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+  }
+
+  return <nav className="result-navigation" aria-label="结果章节">
+    <div className="result-navigation-inner"><span>结果索引</span>
+      {resultSections.map((section) => <a key={section.id} href={`#${section.id}`} aria-current={activeId === section.id ? "location" : undefined} onClick={(event) => navigate(event, section.id)}>{section.label}</a>)}
+    </div>
+  </nav>;
+}
+
 export function AnalysisResults({ taskId, vision, measurements, plan }: { taskId: string; vision: VisionResult; measurements: Measurements; plan?: LightroomPlan | null }) {
   const feasibility = plan?.feasibility;
+  const feasibilityView = feasibility ? feasibilityPresentation(feasibility.score) : null;
+  const feasibilityScore = feasibility ? Math.max(0, Math.min(100, feasibility.score)) : 0;
   return <section className="analysis-results" aria-labelledby="results-title">
-    <header className="result-hero"><div><p className="step">步骤 3 / 3</p><h2 id="results-title">{plan?.style_name ?? "图片分析结果"}</h2><p>{plan?.summary ?? "确定性读数与图片内容理解已经完成；安全 Lightroom 参数计划仍在生成中。"}</p></div>
-      {feasibility && <div className={`feasibility ${feasibility.level}`}><span>匹配可行性</span><strong>{feasibility.score}</strong><small>/ 100 · {feasibility.level === "high" ? "高" : feasibility.level === "medium" ? "中" : "低"}</small></div>}
+    <header className="result-hero"><div className="result-hero-copy"><p className="step">步骤 3 / 3</p><h2 id="results-title">{plan?.style_name ?? "图片分析结果"}</h2><p>{plan?.summary ?? "确定性读数与图片内容理解已经完成；安全 Lightroom 参数计划仍在生成中。"}</p></div>
+      {feasibility && feasibilityView && <div className={`feasibility-meter ${feasibilityView.level}`}>
+        <div className="feasibility-meta"><strong>匹配可行度</strong><span>{feasibilityView.label} · {feasibilityScore}%</span></div>
+        <div className="feasibility-track" role="progressbar" aria-label="匹配可行度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={feasibilityScore}><i style={{ width: `${feasibilityScore}%` }} /></div>
+      </div>}
     </header>
     <div className="result-previews"><figure><img src={`/api/tasks/${taskId}/assets/reference/preview`} alt="参考图 A 分析预览" /><figcaption>参考图 A · 风格来源</figcaption></figure><figure><img src={`/api/tasks/${taskId}/assets/target/preview`} alt="目标图 B 分析预览" /><figcaption>目标图 B · 调整对象</figcaption></figure></div>
-    <MeasurementReport measurements={measurements} />
+    <ResultNavigation />
     <ComparisonReport comparison={measurements.comparison} />
-    {plan ? <PlanReport plan={plan} /> : <section className="plan-pending"><strong>参数计划尚未完成</strong><p>测量和内容理解结果已保留。系统完成规划与本地校验后会在此展示 8–12 项安全调整。</p></section>}
-    <section className="result-section" aria-labelledby="semantic-title"><div className="result-section-heading"><div><p className="step">SEMANTIC CONTEXT</p><h3 id="semantic-title">迁移边界与内容风险</h3></div></div>
+    {plan ? <PlanReport plan={plan} /> : <section id="result-plan" className="plan-pending result-anchor-target" aria-labelledby="plan-pending-title"><strong id="plan-pending-title">参数计划尚未完成</strong><p>测量和内容理解结果已保留。系统完成规划与本地校验后会在此展示 8–12 项安全调整。</p></section>}
+    <section id="result-semantic" className="result-section result-anchor-target" aria-labelledby="semantic-title"><div className="result-section-heading"><div><p className="step">SEMANTIC CONTEXT</p><h3 id="semantic-title">迁移边界与内容风险</h3></div></div>
       <div className="summary-grid"><SummaryCard label="参考图 A" summary={vision.reference} /><SummaryCard label="目标图 B" summary={vision.target} /></div>
       <div className="insight-grid"><InsightList title="可迁移特征" items={vision.transferable_features} /><InsightList title="不可直接迁移" items={vision.non_transferable_features} /><InsightList title="匹配限制" items={vision.matching_limits} /><InsightList title="规划风险" items={vision.planning_risks} /></div>
     </section>
     {feasibility && <section className="risk-summary"><strong>可行性判断依据</strong><ul>{feasibility.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></section>}
+    <MeasurementReport measurements={measurements} />
   </section>;
 }
