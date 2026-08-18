@@ -1,6 +1,6 @@
 # Lightroom 规划对象与方向安全
 
-Status: proposed
+Status: approved
 
 ## 问题
 

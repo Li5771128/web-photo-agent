@@ -50,6 +50,12 @@ class PlannerTest(unittest.TestCase):
         self.assertNotIn("raw_clues", context["target"])
         self.assertIn("allowed_parameters", context)
         self.assertEqual(context["target_format"], "jpeg_or_standard")
+        self.assertEqual(context["objective"], {
+            "reference_role": "reference_A_read_only",
+            "editable_role": "target_B_only",
+            "comparison_delta": "reference_A_minus_target_B",
+            "direction_meaning": "adjust_target_B_toward_reference_A",
+        })
 
     def test_context_keeps_only_non_identifying_raw_dynamic_range_clues(self) -> None:
         raw_target = dict(self.target)
@@ -74,7 +80,7 @@ class PlannerTest(unittest.TestCase):
     def test_jpeg_and_people_tighten_temperature_and_clip_risks(self) -> None:
         clipped_target = measure_image(Image.new("RGB", (4, 4), (255, 255, 255)), "standard")
         comparison = compare_measurements(self.reference, clipped_target)
-        result = validate_plan(draft({"highlights": 10, "whites": 10, "temperature": 15}), clipped_target, VISION, comparison, False)
+        result = validate_plan(draft({"exposure": -0.2, "highlights": 10, "whites": 10, "temperature": 15}), clipped_target, VISION, comparison, False)
         by_key = {item["key"]: item for item in result["parameters"]}
 
         self.assertEqual(by_key["highlights"]["value"], 0)
@@ -96,6 +102,21 @@ class PlannerTest(unittest.TestCase):
         too_short["parameters"] = too_short["parameters"][:7]
         with self.assertRaisesRegex(ValueError, "8 to 12"):
             validate_plan(too_short, self.target, VISION, self.comparison, False)
+
+    def test_rejects_exposure_that_moves_target_away_from_reference(self) -> None:
+        dark_reference = measure_image(Image.new("RGB", (4, 4), (80, 80, 80)), "standard")
+        bright_target = measure_image(Image.new("RGB", (4, 4), (160, 160, 160)), "standard")
+        target_must_darken = compare_measurements(dark_reference, bright_target)
+
+        with self.assertRaisesRegex(ValueError, "exposure direction"):
+            validate_plan(draft({"exposure": 0.3}), bright_target, VISION, target_must_darken, False)
+        safe = validate_plan(draft({"exposure": -0.3}), bright_target, VISION, target_must_darken, False)
+        self.assertEqual(safe["parameters"][0]["value"], -0.3)
+
+        with self.assertRaisesRegex(ValueError, "exposure direction"):
+            validate_plan(draft({"exposure": -0.3}), self.target, VISION, self.comparison, False)
+        safe = validate_plan(draft({"exposure": 0.3}), self.target, VISION, self.comparison, False)
+        self.assertEqual(safe["parameters"][0]["value"], 0.3)
 
 
 if __name__ == "__main__":

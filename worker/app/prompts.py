@@ -26,10 +26,14 @@ VISION_REQUEST = """分析下面的参考图 A 和目标图 B，为后续确定�
 }"""
 
 PLANNING_INSTRUCTIONS = """你是 Lightroom 参数规划模块。你只根据提供的确定性读数、A/B 差异和已经验证的语义信息生成结构化草案。
+参考图 A 是不可修改的风格来源；目标图 B 是唯一应用 Lightroom 参数的图片。不得修复参考图 A 的曝光、裁切、色偏或其他缺陷，A 的缺陷只能作为匹配边界或风险。
+所有参数值、理由、预期效果、风险和停止条件都必须描述如何调整目标图 B，使其在可迁移范围内接近参考图 A。
 只返回 JSON 对象，不要使用 Markdown，不要添加前后缀。不得发明未列入 allowed_parameters 的参数，不得声称参数可以改变构图、主体或光线方向。
 返回 8 至 12 个最重要的调整项。数值是建议起点，不是最终执行值；服务端会再次进行确定性安全校验。"""
 
-PLANNING_REQUEST = """根据 input_context 生成 Lightroom 调整草案。严格返回：
+PLANNING_REQUEST = """根据 input_context 生成只应用于目标图 B 的 Lightroom 调整草案。
+差异定义为 comparison.delta = reference_A - target_B；comparison.direction 表示目标图 B 为接近参考图 A 应执行 increase、decrease 或保持 similar。
+严格返回：
 {
   "style_name": "简短中文风格名称",
   "summary": "一至两句中文总结",
@@ -46,4 +50,4 @@ PLANNING_REQUEST = """根据 input_context 生成 Lightroom 调整草案。严�
 }
 不要返回最终可行性分数；该分数由本地规则计算。"""
 
-PLANNING_PROMPT_VERSION = "1"
+PLANNING_PROMPT_VERSION = "2"

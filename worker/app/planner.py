@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import Any
 
 PLAN_SCHEMA_VERSION = 1
-VALIDATOR_VERSION = "1.0"
+VALIDATOR_VERSION = "1.1"
+EXPOSURE_DIRECTION_EPSILON = 0.05
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,12 @@ def planning_context(
 
     return {
         "measurement_schema_version": reference["schema_version"],
+        "objective": {
+            "reference_role": "reference_A_read_only",
+            "editable_role": "target_B_only",
+            "comparison_delta": "reference_A_minus_target_B",
+            "direction_meaning": "adjust_target_B_toward_reference_A",
+        },
         "reference": sanitized_measurement(reference),
         "target": sanitized_measurement(target),
         "comparison": comparison,
@@ -93,6 +100,18 @@ def _required_text(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value.strip() or len(value.strip()) > 500:
         raise ValueError(f"invalid plan {field}")
     return value.strip()
+
+
+def _validate_parameter_direction(key: str, value: float, comparison: dict[str, Any]) -> None:
+    if key != "exposure" or abs(value) <= EXPOSURE_DIRECTION_EPSILON:
+        return
+    luminance_direction = comparison.get("median_luminance", {}).get("direction")
+    moves_away = (
+        (luminance_direction == "decrease" and value > EXPOSURE_DIRECTION_EPSILON)
+        or (luminance_direction == "increase" and value < -EXPOSURE_DIRECTION_EPSILON)
+    )
+    if moves_away:
+        raise ValueError("invalid exposure direction for target B")
 
 
 def _risk_adjusted_range(key: str, rule: ParameterRule, target: dict[str, Any], vision: dict[str, Any], is_raw: bool) -> tuple[float, float]:
@@ -159,6 +178,7 @@ def validate_plan(draft: dict[str, Any], target: dict[str, Any], vision: dict[st
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             raise ValueError(f"invalid plan value: {key}")
         numeric = float(value)
+        _validate_parameter_direction(key, numeric, comparison)
         base_lower, base_upper = rule.raw_range if target_is_raw else rule.jpeg_range
         base_span = base_upper - base_lower
         if numeric < base_lower - base_span * 0.25 or numeric > base_upper + base_span * 0.25:

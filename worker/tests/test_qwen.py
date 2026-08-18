@@ -4,6 +4,7 @@ import unittest
 import httpx
 
 from app.qwen import QwenPlanningClient, QwenVisionClient, VisionProviderError
+from app.prompts import PLANNING_PROMPT_VERSION
 
 
 VALID_RESULT = {
@@ -129,6 +130,10 @@ class QwenVisionClientTest(unittest.TestCase):
         serialized = json.dumps(observed)
         self.assertNotIn("input_image", serialized)
         self.assertNotIn("image_url", serialized)
+        self.assertIn("目标图 B 是唯一", observed["instructions"])
+        self.assertIn("不得修复参考图 A", observed["instructions"])
+        self.assertIn("reference_A - target_B", content[0]["text"])
+        self.assertEqual(PLANNING_PROMPT_VERSION, "2")
 
 
 if __name__ == "__main__":
