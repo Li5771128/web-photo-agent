@@ -2,6 +2,8 @@
 
 更新时间：2026-08-19
 
+归档状态：本阶段已结束。最终完成/未完成快照见 `.scratch/color-analysis-mvp/archive.md`。
+
 ## 新对话起点
 
 先读取：
@@ -12,7 +14,7 @@
 4. `ARCHITECTURE.md`
 5. `README.md`
 
-当前先人工验收 issue 02 的真实千问双调用和结果页；验收通过后继续 issue 03：从已校验计划确定性生成可选 XMP。
+Issue 02 已完成真实千问联调和结果页验收。后续优先实现到期清理，再继续 issue 03 的确定性 XMP 导出。
 
 ## 已实现
 
@@ -43,7 +45,7 @@
   - A/B comparison 使用 `reference - target` 差值与 `increase/decrease/similar` 方向。
   - `image_measurements` 以任务为单位原子保存 reference、target、comparison 三组 Schema v2 JSON；新增 A/B 各自的 32-bin 真实 RGB 直方图，历史 v1 仍可读取。
 - 分析结果与 Lightroom 计划：
-  - 结果页默认展示 A/B 预览、双 RGB 直方图、全部确定性读数、主色、A/B 调整方向、迁移边界与风险。
+  - 结果页沿用上传卡片中的 A/B 预览，并展示双 RGB 直方图、全部确定性读数、主色、A/B 调整方向、迁移边界与风险。
   - 第二次千问调用只接收清洗后的数值与已验证语义 JSON，不接收图片、EXIF、对象路径或存储地址。
   - 本地校验器约束参数白名单、8–12 项数量、顺序、RAW/JPEG 安全范围、裁切和肤色风险。
   - 参数卡按基础校正、风格塑造、可选微调展示 Lightroom 面板、起始值、安全范围、理由、效果、风险和停止条件。
@@ -76,7 +78,7 @@ docker compose up --build -d
 
 - `docker compose config` 通过。
 - Next.js 生产构建与 TypeScript 检查通过。
-- Worker 离线单元测试 36 项通过，覆盖预览、RAW、千问双调用、真实直方图、规划上下文、安全校验、持久化、重试和取消安全。
+- Worker 离线单元测试 37 项通过，覆盖预览、RAW、千问双调用、真实直方图、规划上下文、安全校验、方向保护、持久化、重试和取消安全。
 - 独立上传/手动确认/单侧替换冒烟脚本通过；用户也已确认页面按钮正常出现。
 - 无千问测量冒烟脚本通过：任务 API 返回完整 Schema v2 reference、target、comparison 与 A/B RGB 直方图。
 - Web 生产构建和 TypeScript 检查通过；Worker 镜像构建通过。
