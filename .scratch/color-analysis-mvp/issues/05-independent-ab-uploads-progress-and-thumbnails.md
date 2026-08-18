@@ -39,6 +39,17 @@ Status: ready-for-agent
 - 缩略图优先使用 `URL.createObjectURL(file)` 本地展示，不需要公开 MinIO 对象地址或额外上传副本。
 - AI 图片内容理解仍由 Redis/Worker 异步执行。本需求只要求该阶段展示状态文案，明确不提供处理百分比。
 
+## File Limits and RAW
+
+- 参考图 A 支持 JPG、JPEG、PNG、WebP，最大 30 MB。
+- 目标图 B 的 JPG、JPEG、PNG、WebP 最大 30 MB。
+- 目标图 B 额外支持 DNG、CR2、CR3、NEF、ARW、RAF、RW2、ORF，RAW 最大 40 MB。
+- RAW 选择后先显示格式、文件名、进度与提示：“RAW 文件需上传后生成预览，上传期间暂不显示缩略图。”服务端解码完成后替换为无 EXIF JPEG 缩略图。
+- 用户可在任何阶段只更换 A 或 B。AI 已开始时需确认取消当前分析；新任务复用未更换资产，只上传被替换的一侧。
+- “重新开始”中止 A/B 未完成上传并取消旧任务；已经发出的模型请求可以结束，但结果必须丢弃。
+
+完整设计见 `docs/superpowers/specs/2026-08-18-independent-upload-and-raw-design.md`。
+
 ## Comments
 
 ### 2026-08-18 — 用户澄清
@@ -47,3 +58,10 @@ Status: ready-for-agent
 - A、B 上传进度相互独立，百分比仅用于文件上传。
 - AI 图片内容理解不需要百分比。
 - 上传成功后需要显示并保留 A/B 缩略图。
+
+### 2026-08-18 — 交互与 RAW 范围确认
+
+- 选择文件后自动开始上传。
+- AI 开始后仍允许单独更换一张图片；确认后取消旧分析，新任务复用另一张图片。
+- 重新开始会中止当前上传并取消旧任务，迟到模型结果不得写回。
+- 普通图片上限调整为 30 MB；目标图 B 支持首批八种 RAW 格式，RAW 上限为 40 MB。
