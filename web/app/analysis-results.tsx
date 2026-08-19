@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { comparisonEntries, feasibilityPresentation, resultSections, type Comparison } from "../lib/analysis-results";
+import { XmpExportControl } from "./xmp-export-control";
 
 type ImageSummary = {
   scene_type: string;
@@ -157,7 +158,7 @@ function ComparisonReport({ comparison }: { comparison: Comparison }) {
 }
 
 const groupLabels = { basic: "基础校正", style: "风格塑造", fine_tune: "可选微调" };
-function PlanReport({ plan }: { plan: LightroomPlan }) {
+function PlanReport({ plan, taskId }: { plan: LightroomPlan; taskId: string }) {
   return <section id="result-plan" className="result-section result-anchor-target" aria-labelledby="plan-title"><div className="result-section-heading"><div><p className="step">SAFE LIGHTROOM PLAN</p><h3 id="plan-title">Lightroom 参数计划</h3></div><span>{plan.parameters.length} 项调整</span></div>
     {(["basic", "style", "fine_tune"] as const).map((group) => {
       const parameters = plan.parameters.filter((parameter) => parameter.group === group);
@@ -169,6 +170,7 @@ function PlanReport({ plan }: { plan: LightroomPlan }) {
       </article>)}</div></div>;
     })}
     {!!plan.validation_notes.length && <div className="validation-notes"><strong>本地校验记录</strong><ul>{plan.validation_notes.map((note) => <li key={note}>{note}</li>)}</ul></div>}
+    <XmpExportControl taskId={taskId} />
   </section>;
 }
 
@@ -206,7 +208,7 @@ function ResultNavigation() {
   </nav>;
 }
 
-export function AnalysisResults({ vision, measurements, plan }: { vision: VisionResult; measurements: Measurements; plan?: LightroomPlan | null }) {
+export function AnalysisResults({ taskId, vision, measurements, plan }: { taskId: string; vision: VisionResult; measurements: Measurements; plan?: LightroomPlan | null }) {
   const feasibility = plan?.feasibility;
   const feasibilityView = feasibility ? feasibilityPresentation(feasibility.score) : null;
   const feasibilityScore = feasibility ? Math.max(0, Math.min(100, feasibility.score)) : 0;
@@ -219,7 +221,7 @@ export function AnalysisResults({ vision, measurements, plan }: { vision: Vision
     </header>
     <ResultNavigation />
     <ComparisonReport comparison={measurements.comparison} />
-    {plan ? <PlanReport plan={plan} /> : <section id="result-plan" className="plan-pending result-anchor-target" aria-labelledby="plan-pending-title"><strong id="plan-pending-title">参数计划尚未完成</strong><p>测量和内容理解结果已保留。系统完成规划与本地校验后会在此展示 8–12 项安全调整。</p></section>}
+    {plan ? <PlanReport plan={plan} taskId={taskId} /> : <section id="result-plan" className="plan-pending result-anchor-target" aria-labelledby="plan-pending-title"><strong id="plan-pending-title">参数计划尚未完成</strong><p>测量和内容理解结果已保留。系统完成规划与本地校验后会在此展示 8–12 项安全调整。</p></section>}
     <section id="result-semantic" className="result-section result-anchor-target" aria-labelledby="semantic-title"><div className="result-section-heading"><div><p className="step">SEMANTIC CONTEXT</p><h3 id="semantic-title">迁移边界与内容风险</h3></div></div>
       <div className="summary-grid"><SummaryCard label="参考图 A" summary={vision.reference} /><SummaryCard label="目标图 B" summary={vision.target} /></div>
       <div className="insight-grid"><InsightList title="可迁移特征" items={vision.transferable_features} /><InsightList title="不可直接迁移" items={vision.non_transferable_features} /><InsightList title="匹配限制" items={vision.matching_limits} /><InsightList title="规划风险" items={vision.planning_risks} /></div>

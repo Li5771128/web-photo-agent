@@ -1,6 +1,6 @@
 # RefTone 调色分析 MVP
 
-当前仓库支持匿名、独立上传参考图 A 与目标图 B、创建 24 小时临时任务，并由 Python Worker 完成本地确定性图像测量、千问语义理解、结构化 Lightroom 参数规划和本地安全校验。A/B 选择后自动上传且互不阻塞；目标图 B 支持常见 RAW。XMP、同会话二次微调和到期自动清理尚未实现。
+当前仓库支持匿名、独立上传参考图 A 与目标图 B、创建 24 小时临时任务，并由 Python Worker 完成本地确定性图像测量、千问语义理解、结构化 Lightroom 参数规划和本地安全校验。A/B 选择后自动上传且互不阻塞；目标图 B 支持常见 RAW。安全计划可按请求确定性导出为 Lightroom Classic 14/15 XMP 起始配方；同会话二次微调和到期自动清理尚未实现。
 
 ## 本地启动
 
@@ -39,6 +39,7 @@ docker compose down
 - `POST /api/tasks/:taskId/analysis`：A/B 均确认且所需预览就绪后，由用户确认并原子入队。
 - `GET /api/tasks/:taskId`：仅允许创建该任务的匿名临时会话查询状态、版本化确定性测量、视觉结果和已校验 Lightroom 计划。
 - `GET /api/tasks/:taskId/assets/:role/preview`：读取会话所属任务的服务端安全预览。
+- `GET /api/tasks/:taskId/xmp`：仅从会话所属任务的已校验计划同步生成并下载 XMP，不持久化文件或改变任务状态。
 - `POST /api/tasks/:taskId/replacement`：AI 已开始后单独换 A 或 B，并复用未更换图片。
 - `DELETE /api/tasks/:taskId`：幂等取消任务并清理当前已记录的临时对象。
 
