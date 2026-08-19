@@ -67,3 +67,17 @@ export async function taskBelongsToSession(taskId: string, sessionHash: string):
   );
   return result.rowCount === 1;
 }
+
+export async function getXmpExportSource(
+  taskId: string,
+  sessionHash: string,
+): Promise<{ status: TaskStatus; safePlan: unknown | null } | null> {
+  const result = await getDatabase().query(
+    `SELECT t.status, p.safe_plan AS "safePlan"
+     FROM color_tasks t
+     LEFT JOIN lightroom_plans p ON p.task_id = t.id
+     WHERE t.id = $1 AND t.session_hash = $2 AND t.expires_at > now()`,
+    [taskId, sessionHash],
+  );
+  return result.rowCount === 1 ? result.rows[0] : null;
+}

@@ -5,6 +5,12 @@ Archive status: phase-complete-with-follow-ups
 
 本文件是本阶段开发对话结束时的事实快照。后续工作应从这里选择一个未完成 Issue，不要把本阶段已经验收的上传、测量、规划和结果页重新实现。
 
+## 2026-08-20 后续更新
+
+- Issue 03 已完成：从安全计划确定性生成会话受保护的 XMP，明确不导出白平衡或曲线，Lightroom Classic 初步导入验证通过。
+- Web 回归测试现为 13 项，并已补充非法任务 ID、任务归属/状态、下载响应头和完整参数映射覆盖。
+- 当前优先级变更为：Issue 04 到期清理、Issue 04 同会话二次微调、Issue 05 真实大文件/RAW 验证，以及 XMP 导出失败隔离的浏览器自动化。
+
 ## 已完成
 
 ### Issue 02 — 参考风格报告与安全 Lightroom 参数计划
@@ -43,10 +49,6 @@ Archive status: phase-complete-with-follow-ups
 
 ## 未完成
 
-### Issue 03 — 可选 XMP 预设导出
-
-五项验收均未实现。XMP 必须从已校验结构化计划确定性生成，不得使用模型自由文本。
-
 ### Issue 04 — 同会话二次微调与临时数据清理
 
 - 未实现上传调整后 JPG、轮次数据、上一份安全计划关联和增量微调建议。
@@ -63,9 +65,9 @@ Archive status: phase-complete-with-follow-ups
 ## 后续建议顺序
 
 1. Issue 04 中的到期清理部分：优先补齐临时数据承诺。
-2. Issue 03：从安全计划确定性生成 XMP。
-3. Issue 04 中的同会话二次微调。
-4. Issue 05 的真实大文件、网络限速和八类真实 RAW 人工验证。
+2. Issue 04 中的同会话二次微调。
+3. Issue 05 的真实大文件、网络限速和八类真实 RAW 人工验证。
+4. 为 XMP 导出错误隔离补充 React/浏览器组件自动化。
 
 ## 后续对话入口
 
